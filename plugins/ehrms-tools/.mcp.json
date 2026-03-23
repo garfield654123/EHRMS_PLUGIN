@@ -15,7 +15,10 @@
     "command": "py",
     "args": ["-m", "jira_mcp"],
     "env": {
-      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/JIRA_MCP"
+      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/JIRA_MCP",
+      "JIRA_BASE_URL": "${JIRA_BASE_URL}",
+      "JIRA_EMAIL": "${JIRA_EMAIL}",
+      "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
     }
   }
 }
