@@ -1,0 +1,19 @@
+{
+  "ehrms-database": {
+    "type": "stdio",
+    "command": "py",
+    "args": ["C:\\D\\MCP_1.0\\server.py"],
+    "env": {
+      "MCP_MODE": "stdio",
+      "PYTHONPATH": "C:\\D\\MCP_1.0",
+      "MSSQL_SERVER": "${MSSQL_SERVER}",
+      "MSSQL_DATABASE": "${MSSQL_DATABASE}",
+      "MSSQL_USERNAME": "${MSSQL_USERNAME}",
+      "MSSQL_PASSWORD": "${MSSQL_PASSWORD}"
+    }
+  },
+  "jira-mcp": {
+    "type": "http",
+    "url": "http://<INTERNAL_IP>:7000/sse"
+  }
+}
