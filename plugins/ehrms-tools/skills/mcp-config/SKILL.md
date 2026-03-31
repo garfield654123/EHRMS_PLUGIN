@@ -5,6 +5,13 @@ description: 管理 Claude Code MCP 伺服器設定，支援新增 JIRA MCP 與 
 
 # MCP 配置管理
 
+## JIRA Issue 編號規則
+
+**當使用者只提供數字（例如 `27046`）時，一律自動補上 `EHRMSONE-` 前綴，視為 `EHRMSONE-27046`。**
+僅在使用者明確提供完整 Key（例如 `NPR-123`、`CSHR-456`）時，才使用其指定的前綴。
+
+---
+
 | MCP | 用途 | Repo |
 |-----|------|------|
 | **JIRA MCP** | 查詢 Jira Cloud issues | `garfield654123/JIRA_MCP` |
