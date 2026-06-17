@@ -253,7 +253,6 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 | 工具 | 說明 | 使用情境 |
 |------|------|----------|
 | `get_issue_summary` | 取得 Issue 基本摘要（輕量） | 快速查看標題與狀態 |
-| `get_issue` | 取得 Issue 完整詳細資訊 | 查看完整描述、欄位 |
 | `search_issues` | 使用 JQL 搜尋 Issues | 條件篩選多筆 Issue |
 | `get_my_issues` | 取得指定使用者負責的 Issues | 查看個人待辦 |
 | `get_comments` | 取得 Issue 所有評論 | 查看討論紀錄 |

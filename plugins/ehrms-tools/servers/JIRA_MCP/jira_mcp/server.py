@@ -59,34 +59,6 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
-            name="get_issue",
-            description="取得單一 Issue 的詳細資訊，支援欄位過濾與 ADF 轉純文字。",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "issue_key": {
-                        "type": "string",
-                        "description": "Issue 的 Key，例如: PROJ-123"
-                    },
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "指定要回傳的欄位，不填則回傳全部"
-                    },
-                    "plain_text": {
-                        "type": "boolean",
-                        "description": "是否將 ADF 轉為純文字（預設 true）",
-                        "default": True
-                    },
-                    "expand": {
-                        "type": "string",
-                        "description": "要展開的額外資訊，例如: changelog,renderedFields（選填）"
-                    }
-                },
-                "required": ["issue_key"]
-            }
-        ),
-        Tool(
             name="search_issues",
             description="使用 JQL 搜尋 Jira Issues。支援完整的 JQL 語法，可查詢所有欄位包含自訂欄位。",
             inputSchema={
@@ -252,22 +224,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(
                 type="text",
                 text=json.dumps(result, ensure_ascii=False, indent=2)
-            )]
-
-        elif name == "get_issue":
-            issue_key = arguments["issue_key"]
-            fields = arguments.get("fields")
-            plain_text = arguments.get("plain_text", True)
-            expand = arguments.get("expand")
-            result = await client.get_issue(
-                issue_key=issue_key,
-                fields=fields,
-                plain_text=plain_text,
-                expand=expand
-            )
-            return [TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, ensure_ascii=False)
             )]
 
         elif name == "search_issues":
