@@ -20,5 +20,14 @@
       "JIRA_EMAIL": "${JIRA_EMAIL}",
       "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
     }
+  },
+  "ehrms-codegraph": {
+    "command": "py",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/server.py"],
+    "env": {
+      "MCP_MODE": "stdio",
+      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH",
+      "CODEGRAPH_DB": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/codegraph.sqlite"
+    }
   }
 }
