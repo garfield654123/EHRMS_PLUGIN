@@ -1,0 +1,102 @@
+{
+  "anchors": [
+    {
+      "domain": "假勤計算",
+      "triggers": "假勤,加班,請假,時數,用餐,休息,彈性工時,彈性,班別,誤餐,遲到,曠職,出勤",
+      "entry_path": "VB/EHRMS/Personnel/Cls/clsAttendance.cls",
+      "entry_methods": "GetAttendance_DataOP_Cal,AddAskLeave,fixLeaveWorktime",
+      "key_tables": "FLEXIBLE_MINUTES,IS_FLEXIBLE_LEAVE,DELAY_MEAL_WORKDAY",
+      "skill": "假勤計算",
+      "note": "假勤/加班/請假時數計算主體"
+    },
+    {
+      "domain": "薪資計算",
+      "triggers": "薪資,計薪,加班費,勞退,二代健保,投保薪資,扣款,結薪",
+      "entry_path": "VB/EHRMS/Payroll/Cls/clsPAYSalaryCacul.cls",
+      "entry_methods": "Save_Cal,CalOverTime,CalSecondHealth",
+      "key_tables": "",
+      "skill": "薪資計算",
+      "note": "月薪資計算主體"
+    },
+    {
+      "domain": "通知寄送",
+      "triggers": "通知信,通知,提醒,寄送,寄信,排程,到期通知,發信",
+      "entry_path": "VB/EHRMS/AuotEngine/ClsAutorun_A.cls",
+      "entry_methods": "runNotify_r,doNotify",
+      "key_tables": "HRMS_NOTIFY_REFERENCE",
+      "skill": "",
+      "note": "AutoEngine 排程通知主體"
+    },
+    {
+      "domain": "刷卡異常通知",
+      "triggers": "刷卡異常,刷卡,卡鐘,打卡,超時出勤",
+      "entry_path": "VB/EHRMS/AuotEngine/ClsAutorun_A.cls",
+      "entry_methods": "doNotify_CARD_DATA_MATCH,doNotify_CARD_DATA_MATCH_OT",
+      "key_tables": "HRMS_NOTIFY_REFERENCE",
+      "skill": "",
+      "note": "SNR29 刷卡異常通知"
+    },
+    {
+      "domain": "保險加退保",
+      "triggers": "勞保,健保,職災,加保,退保,停保,投保,眷屬",
+      "entry_path": "VB/EHRMS/Payroll_Insurance/Cls/clsPAYInsurance.cls",
+      "entry_methods": "",
+      "key_tables": "HRMS_EMPLOYEE_LABOR,HRMS_EMPLOYEE_HEALTH",
+      "skill": "",
+      "note": "各類保險加退保"
+    },
+    {
+      "domain": "育嬰留停設定",
+      "triggers": "育嬰留停,育嬰,留停設定,適用對象",
+      "entry_path": "EHRMS/Personnel/PELSystemSetting/PELSysSet_Parameter/Parameter_Stop_Parental_index.asp",
+      "entry_methods": "clsParameter",
+      "key_tables": "HRMS_STOP_PARENTAL_SET",
+      "skill": "",
+      "note": "育嬰留停設定檔頁面"
+    },
+    {
+      "domain": "訂餐福利",
+      "triggers": "訂餐,餐廳,菜單,便當,叫餐,用餐刷卡,餐費",
+      "entry_path": "VB/EHRMS/Payroll/Cls/clsPayDineCard.cls",
+      "entry_methods": "GetMealDataList,SaveMealParameter",
+      "key_tables": "",
+      "skill": "",
+      "note": "員工訂餐/用餐刷卡(與假勤用餐時段不同!)"
+    },
+    {
+      "domain": "權限管理",
+      "triggers": "權限,後台管理權限,功能權限,角色,群組權限,授權,可使用功能,選單權限,登入權限,管理權限",
+      "entry_path": "VB/EHRMS/Authority/Cls/AuthorityItemClass.cls",
+      "entry_methods": "LoadFuncItem,LoadMenu,LoadFunction（權限判斷）/ ClsAuthority_Group.GetGroupList,SaveSysGroup（權限設定SF0730）",
+      "key_tables": "HRMS_SYS_GROUP,HRMS_SYS_FUNCTION,HRMS_SYS_ITEM,HRMS_SYS_MEMBER",
+      "skill": "",
+      "note": "權限判斷=Authority.AuthorityItemClass + LoginChk.LoginRightChk；權限設定=SF0730 ClsAuthority_Group"
+    }
+  ],
+  "synonyms": [
+    {
+      "term": "打卡",
+      "maps_to": "刷卡"
+    },
+    {
+      "term": "上下班",
+      "maps_to": "刷卡"
+    },
+    {
+      "term": "補休",
+      "maps_to": "加班"
+    },
+    {
+      "term": "特休",
+      "maps_to": "假勤"
+    },
+    {
+      "term": "留停",
+      "maps_to": "留職停薪"
+    },
+    {
+      "term": "卡鐘",
+      "maps_to": "刷卡"
+    }
+  ]
+}

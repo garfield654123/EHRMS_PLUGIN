@@ -1,9 +1,32 @@
 # -*- coding: utf-8 -*-
 """codegraph 核心邏輯：find_entry / trace / verify_call_path（唯讀 sqlite）"""
-import os, re, sqlite3
+import os, re, json, sqlite3
 
 DB_PATH = os.getenv("CODEGRAPH_DB") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "codegraph.sqlite")
+# ANCHOR/SYNONYM 改用 git 友善的 json（source of truth），非 sqlite binary
+ANCHORS_JSON = os.getenv("CODEGRAPH_ANCHORS") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "anchors.json")
+
+
+def _load_anchors(cur=None):
+    """回傳 (anchors, synonyms)。優先讀 anchors.json，缺檔才退回 sqlite 表。"""
+    if os.path.exists(ANCHORS_JSON):
+        d = json.load(open(ANCHORS_JSON, encoding="utf-8"))
+        anchors = [(a.get("domain", ""), a.get("triggers", ""), a.get("entry_path", ""),
+                    a.get("entry_methods", ""), a.get("key_tables", ""), a.get("skill", ""))
+                   for a in d.get("anchors", [])]
+        syns = [(s.get("term", ""), s.get("maps_to", "")) for s in d.get("synonyms", [])]
+        return anchors, syns
+    if cur is not None:
+        try:
+            anchors = list(cur.execute(
+                "SELECT DOMAIN,TRIGGERS,ENTRY_PATH,ENTRY_METHODS,KEY_TABLES,SKILL FROM HRMS_CODE_ANCHOR"))
+            syns = list(cur.execute("SELECT TERM,MAPS_TO FROM HRMS_CODE_SYNONYM"))
+            return anchors, syns
+        except Exception:
+            pass
+    return [], []
 
 
 def _con():
@@ -36,14 +59,14 @@ def _sha(cur):
 def find_entry(description, top_k=3):
     con = _con(); cur = con.cursor()
     try:
+        anchors, syns = _load_anchors(cur)
         text = description
-        for term, mp in cur.execute("SELECT TERM,MAPS_TO FROM HRMS_CODE_SYNONYM"):
-            if term in description:
+        for term, mp in syns:
+            if term and term in description:
                 text += " " + mp
         # ① ANCHOR：命中觸發詞數
         A = []
-        for d, trig, ep, em, kt, sk in cur.execute(
-                "SELECT DOMAIN,TRIGGERS,ENTRY_PATH,ENTRY_METHODS,KEY_TABLES,SKILL FROM HRMS_CODE_ANCHOR"):
+        for d, trig, ep, em, kt, sk in anchors:
             hit = [t for t in (trig or '').split(",") if t and t in text]
             if hit:
                 A.append((len(hit), d, ep, em, kt, sk))
@@ -161,3 +184,25 @@ def verify_call_path(src_method, dst):
                 "請人工於原始碼確認，切勿當作『一定沒有』。")
     finally:
         con.close()
+
+
+# ── 回饋迴路：把查對的「敘述領域→入口」沉澱成 ANCHOR ──────────
+def learn(domain, triggers, entry_path, entry_methods="", key_tables="", note=""):
+    """新增/更新一個領域錨點到 anchors.json（越用越準）。"""
+    data = {"anchors": [], "synonyms": []}
+    if os.path.exists(ANCHORS_JSON):
+        data = json.load(open(ANCHORS_JSON, encoding="utf-8"))
+    data.setdefault("anchors", [])
+    data.setdefault("synonyms", [])
+    # 同名領域則覆蓋
+    data["anchors"] = [a for a in data["anchors"] if a.get("domain") != domain]
+    data["anchors"].append({
+        "domain": domain, "triggers": triggers, "entry_path": entry_path,
+        "entry_methods": entry_methods, "key_tables": key_tables, "skill": "", "note": note,
+    })
+    with open(ANCHORS_JSON, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return (f"✅ 已學習領域【{domain}】→ `{entry_path}`\n"
+            f"觸發詞：{triggers}\n"
+            f"目前共 {len(data['anchors'])} 個領域。\n"
+            f"⚠️ 寫入的是執行中副本的 anchors.json；要**永久保留**請把它 commit 進 plugin 原始碼。")

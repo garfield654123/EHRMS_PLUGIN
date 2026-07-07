@@ -67,6 +67,25 @@ async def list_tools() -> list[Tool]:
                 "required": ["src_method", "dst"],
             },
         ),
+        Tool(
+            name="learn",
+            description=(
+                "把一次查對的『領域→入口』沉澱成領域錨點（回饋迴路，讓 find_entry 越用越準）。"
+                "當 find_entry 未命中、但你已用其他方式確認了某敘述對應的正確程式入口時，呼叫這個記起來。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "domain": {"type": "string", "description": "領域名稱，如『權限管理』"},
+                    "triggers": {"type": "string", "description": "觸發詞，逗號分隔，如『權限,角色,授權』"},
+                    "entry_path": {"type": "string", "description": "主入口類別/檔案路徑"},
+                    "entry_methods": {"type": "string", "description": "關鍵入口函式（可選）"},
+                    "key_tables": {"type": "string", "description": "關鍵資料表/欄位（可選）"},
+                    "note": {"type": "string", "description": "備註（可選）"},
+                },
+                "required": ["domain", "triggers", "entry_path"],
+            },
+        ),
     ]
 
 
@@ -78,6 +97,11 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
         return _text(cg.trace(arguments["entry"], arguments.get("cls_hint"), arguments.get("depth", 2)))
     if name == "verify_call_path":
         return _text(cg.verify_call_path(arguments["src_method"], arguments["dst"]))
+    if name == "learn":
+        return _text(cg.learn(
+            arguments["domain"], arguments["triggers"], arguments["entry_path"],
+            arguments.get("entry_methods", ""), arguments.get("key_tables", ""),
+            arguments.get("note", "")))
     raise ValueError(f"Unknown tool: {name}")
 
 
