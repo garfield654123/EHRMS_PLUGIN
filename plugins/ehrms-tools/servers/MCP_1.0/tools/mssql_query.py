@@ -3,9 +3,32 @@ MSSQL 查詢工具服務
 """
 import time
 from typing import List, Dict, Any, Optional
+import sqlparse
 from utils.db import execute_query_with_pool, get_db_credentials
 from utils.formatter import format_query_results, format_text_response, format_error_response
 from utils.session_manager import get_session_manager
+
+
+def _is_read_only_query(query: str) -> bool:
+    """只放行單一 SELECT / WITH 語句。
+    DB 帳號因 codegraph 記憶功能被授予特定表的 INSERT/UPDATE 權限，
+    此工具必須在程式端維持唯讀，避免成為寫入通道。"""
+    statements = [s for s in sqlparse.split(query) if s.strip()]
+    if len(statements) != 1:
+        return False
+    parsed = sqlparse.parse(statements[0])
+    if not parsed:
+        return False
+    stmt = parsed[0]
+    # get_type 會穿透 WITH（CTE），回傳其後真正的 DML 型別，
+    # 擋下 WITH x AS (...) DELETE/UPDATE/INSERT 這類夾帶寫入
+    if stmt.get_type() != "SELECT":
+        return False
+    # SELECT ... INTO 會建表寫入，一併擋下
+    for tok in stmt.flatten():
+        if tok.ttype in sqlparse.tokens.Keyword and tok.normalized == "INTO":
+            return False
+    return True
 
 
 def execute_mssql_query(
@@ -44,7 +67,14 @@ def execute_mssql_query(
         
         # 驗證連線資訊
         get_db_credentials(server, database, username, password)
-        
+
+        # 唯讀防護：僅允許單一 SELECT / WITH 語句
+        if not _is_read_only_query(query):
+            return format_text_response(
+                "❌ mssql_query 僅允許單一 SELECT（或 WITH）查詢語句，"
+                "不接受 INSERT/UPDATE/DELETE/DDL 或多語句。"
+            )
+
         # 執行查詢（注意：對於動態 SQL，無法完全參數化，但仍使用連線池）
         results = execute_query_with_pool(
             query,
