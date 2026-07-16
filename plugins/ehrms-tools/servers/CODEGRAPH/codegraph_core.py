@@ -3,6 +3,7 @@
 - find_entry：完全走記憶層（HRMS_MEMORY 優先，anchors.json / cases.json 備援）
 - trace / verify_call_path：唯讀 sqlite 呼叫圖索引（METHOD/EDGE）"""
 import os, re, json, sqlite3
+from difflib import SequenceMatcher
 
 import memory_db as mem
 
@@ -68,13 +69,41 @@ def _con():
 
 
 def _bigrams(t):
+    """中文 bigram ＋ 英數 token。
+    英數 token（excel、SP/資料表名等）在本專案是高鑑別度詞彙，
+    原版只取中文 bigram 會把「自訂excel報表」拆成「自訂」「報表」而稀釋相似度。"""
     g = set()
     for run in re.findall(r'[一-鿿]+', t):
         if len(run) == 1:
             g.add(run)
         for i in range(len(run) - 1):
             g.add(run[i:i + 2])
+    for tok in re.findall(r'[A-Za-z0-9_]{2,}', t.lower()):
+        g.add(tok)
     return g
+
+
+def _phrase_bonus(a, b):
+    """最長共同連續片語加權：長問句會稀釋 bigram Dice 分數，
+    但「自訂excel報表」這類 ≥4 字的連續共同片語是高鑑別度訊號，
+    值得直接加分（0.10 起，每多 1 字 +0.03，上限 0.30）。"""
+    m = SequenceMatcher(None, a, b).find_longest_match(0, len(a), 0, len(b))
+    if m.size < 4:
+        return 0.0
+    return min(0.30, 0.10 + 0.03 * (m.size - 4))
+
+
+# ── 待沉澱記錄（pending）：find_entry 未命中時自動建立，remember 帶 id 一行補記 ──
+# 存活範圍＝MCP server process（同一個 Claude Code session），不進共用 DB
+_PENDING = {}
+_PENDING_SEQ = 0
+
+
+def _add_pending(question):
+    global _PENDING_SEQ
+    _PENDING_SEQ += 1
+    _PENDING[_PENDING_SEQ] = question
+    return _PENDING_SEQ
 
 
 def _base(p):
@@ -101,7 +130,7 @@ def _index_sha():
 
 
 # ── 情節記憶：找相似的歷史查詢 ─────────────────────────────
-def similar_episodes(question, top_k=3, threshold=0.34):
+def similar_episodes(question, top_k=3, threshold=0.30):
     """用中文 bigram 相似度（Dice + 包含度）比對歷史 episodes，回傳 [(score, episode)]。"""
     qs = _bigrams(question)
     if not qs:
@@ -116,7 +145,7 @@ def similar_episodes(question, top_k=3, threshold=0.34):
             continue
         dice = 2.0 * inter / (len(qs) + len(es))
         contain = float(inter) / min(len(qs), len(es))
-        score = max(dice, contain * 0.8)
+        score = max(dice, contain * 0.8) + _phrase_bonus(question, ep[1])
         if ep[7]:  # 人工 review 通過（verified）→ 提升可信度
             score = min(1.0, score + 0.10)
         if score >= threshold:
@@ -146,7 +175,7 @@ def similar_knowledge(question, top_k=3, threshold=0.30):
         dice = 2.0 * inter / (len(qs) + len(ks))
         contain = float(inter) / min(len(qs), len(ks))
         topic_contain = float(topic_hit) / len(ts) if ts else 0.0
-        score = max(dice, contain * 0.8, topic_contain)
+        score = max(dice, contain * 0.8, topic_contain) + _phrase_bonus(question, kn[1])
         if kn[6]:  # 人工 review 通過（verified）→ 提升可信度
             score = min(1.0, score + 0.10)
         if score >= threshold:
@@ -241,16 +270,38 @@ def find_entry(description, top_k=3):
         m = f"，從函式 `{em}` 開始" if em else ""
         v = "、已人工驗證" if ver else ""
         out.append(f"之前確認過幾乎相同的問題 → 直接進 `{ep}`{m}（記憶相似 {sc:.2f}、確認 {hits} 次{v}）。")
+    elif eps:
+        # 情節記憶有中但相似度中等：仍優先於「信心 1」的弱錨點，避免單一高頻觸發詞劫持結論
+        sc, (eid, q, ep, em, sha, hits, last, ver) = eps[0]
+        if not A or A[0][0] <= 1:
+            m = f"，函式 `{em}`" if em else ""
+            out.append(f"記憶中有相似問題（相似 {sc:.2f}）→ 優先確認 `{ep}`{m}；"
+                       f"下方錨點信心低（≤1 個觸發詞），僅供備選。")
+        else:
+            top = A[0]
+            out.append(f"這是【{top[1]}】問題 → 進 `{top[2]}`（另有相似記憶見上⚡，可交叉確認）")
+    elif kns and kns[0][0] >= 0.45 and (not A or A[0][0] <= 1):
+        # 系統知識高相關、錨點只中 1 個觸發詞 → 知識優先，錨點降為備選
+        out.append("已有高相關系統知識（見上 📌）——優先依知識內容回答或續查；"
+                   "下方錨點僅命中 1 個觸發詞，信心不足，勿直接當結論。")
     elif A:
         top = A[0]
         c = "（歷史前例佐證，信心高）" if _base(top[2]) in conv else ""
-        out.append(f"這是【{top[1]}】問題 → 進 `{top[2]}` {c}")
+        w = "（僅命中 1 個觸發詞，信心低，建議先驗證）" if top[0] <= 1 else ""
+        out.append(f"這是【{top[1]}】問題 → 進 `{top[2]}` {c}{w}")
         if top[3]:
             out.append(f"建議從函式 `{top[3]}` 開始；可用 `trace` 追呼叫鏈。")
     elif C:
         out.append(f"錨點未命中；最可能檔案 `{_base(C[0][0])}`（僅歷史前例，信心較低，建議人工確認）")
     else:
         out.append("無明確命中。建議改用關鍵字搜尋，或為此領域補一筆 ANCHOR。")
+
+    # 未命中（無記憶、無錨點）→ 建立 pending，讓事後沉澱只需帶 id
+    if not eps and not A:
+        pid = _add_pending(description)
+        out.append(f"\n⏳ 已建立待沉澱記錄 **pending_id={pid}**（本次問句已暫存）。"
+                   f"你自行找到入口後，呼叫 `remember(pending_id={pid}, entry_path=確認的路徑)` "
+                   f"即可一行完成沉澱，不必重打問句。")
     if mem.db_enabled():
         out.append("\n▶ 追完程式鏈、確認實際入口後，請呼叫 `remember` 沉澱記憶（下次直接命中）；"
                    "若過程中確認了系統性知識（排程方式、執行時機、手動/自動等），用 `remember_fact` 記錄。")
@@ -296,6 +347,9 @@ def trace(entry, cls_hint=None, depth=2):
             "SELECT DISTINCT SRC_METHOD FROM HRMS_CODE_EDGE WHERE DST_PATH=? AND SRC_PATH=? AND EDGE_KIND='calls_method'",
             (entry, cls_path))]
         out.append(f"\n▲ 被呼叫(入口)：{', '.join(callers[:12]) or '(無 / 由排程或跨類別呼叫)'}")
+        if mem.db_enabled():
+            out.append("\n▶ 若這條鏈已確認就是答案 → **現在**呼叫 `remember`（問題→入口）沉澱；"
+                       "追鏈過程確認的系統運作事實（排程/觸發時機/資料流）用 `remember_fact`。")
         out.append(f"\n_index @ {_sha(cur)}_")
         return "\n".join(out)
     finally:
@@ -316,6 +370,9 @@ def verify_call_path(src_method, dst):
             if r[2]:
                 lines.append(f"佐證：`{r[2][:150]}`" + (f"（L{r[3]}）" if r[3] else ""))
             lines.append(f"位置：`{r[0]}`")
+            if mem.db_enabled():
+                lines.append("▶ 驗證通過＝呼叫鏈確認。若這就是本次問題的答案，"
+                             "**現在**呼叫 `remember` 沉澱（問題→入口）。")
             return "\n".join(lines)
         return (f"❓ **not_found**：索引查無 `{src_method}` → `{dst}` 的直接呼叫。\n"
                 "⚠️ 這**不代表不存在**——可能是動態呼叫(變數組 SP 名)、跨類別呼叫，或索引未涵蓋。"
@@ -357,8 +414,20 @@ def learn(domain, triggers, entry_path, entry_methods="", key_tables="", note=""
 
 
 # ── 情節記憶：記住「這次的問題 → 確認的入口」──────────────────
-def remember(question, entry_path, entry_method=""):
-    """把一次查對的問題與確認入口寫進共用 EPISODE 表，下次 find_entry 直接命中。"""
+def remember(question, entry_path, entry_method="", pending_id=None):
+    """把一次查對的問題與確認入口寫進共用 EPISODE 表，下次 find_entry 直接命中。
+    pending_id：find_entry 未命中時建立的待沉澱記錄，帶入可省略 question。"""
+    if pending_id:
+        pending_q = _PENDING.get(int(pending_id))
+        if pending_q:
+            if not question:
+                question = pending_q
+            _PENDING.pop(int(pending_id), None)
+        elif not question:
+            return (f"⚠️ 找不到 pending_id={pending_id}（可能 MCP server 已重啟）。"
+                    f"請改帶 question 參數重新呼叫。")
+    if not question:
+        return "⚠️ 需提供 question 或有效的 pending_id。"
     if not mem.db_enabled():
         return ("⚠️ 未設定 MSSQL_* 環境變數，情節記憶功能停用。\n"
                 "領域級的知識仍可用 `learn` 寫入本地 anchors.json。")

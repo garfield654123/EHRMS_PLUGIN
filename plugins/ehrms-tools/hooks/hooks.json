@@ -1,14 +1,13 @@
 {
-  "description": "ehrms-codegraph 記憶迴路保證：查完程式入口卻未沉澱記憶時，於回合結束前提醒補記",
+  "description": "ehrms-codegraph 記憶迴路保證：查完程式入口卻未沉澱記憶時，於回合結束前提醒補記（確定性 command hook，解析 transcript 的 tool_use 名稱判斷，不依賴模型自覺）",
   "hooks": {
     "Stop": [
       {
-        "matcher": "*",
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "檢查本次對話是否遺漏了 codegraph 記憶沉澱。滿足以下任一情況回 block：【A 漏記】(1) 對話中呼叫過 ehrms-codegraph 的 find_entry 或 trace 工具；(2) 之後已經確認出正確的程式入口，或確認了系統運作事實（如排程方式、執行時機、手動/自動觸發）；(3) 卻沒有呼叫 remember、remember_fact 或 learn 把結論記下來——三條件同時成立才算。【B 訂正未處理】使用者訂正了 Claude 先前的結論，但 Claude 沒有以訂正後的版本呼叫記憶工具；或先前已 remember 過錯誤版本，卻沒有在回覆中告知使用者該筆記憶 ID（供日後驗證工具標記 rejected）。block 時 reason 需寫明：該呼叫哪個記憶工具（remember=問題→入口、remember_fact=系統知識、learn=歸納整個領域）、建議記錄的內容，以及訂正情境下需補告知的錯誤記憶 ID。以下情況一律回 approve：沒用過 find_entry/trace、查詢後尚未確認出結論、已正確呼叫過記憶工具且無未處理的訂正、find_entry 結果顯示記憶已命中（⚡ 記憶命中且入口相同）、或本回合已因此提醒過一次。",
-            "timeout": 30
+            "type": "command",
+            "command": "py \"${CLAUDE_PLUGIN_ROOT}/hooks/check_memory.py\"",
+            "timeout": 15
           }
         ]
       }

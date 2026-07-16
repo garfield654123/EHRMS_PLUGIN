@@ -1,6 +1,6 @@
 {
   "name": "ehrms-tools",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "EHRMS 開發工具包：整合 JIRA MCP、DB MCP 查詢工具、codegraph 程式入口查詢與團隊共用記憶（HRMS_MEMORY）及 MCP 設定管理 skill。",
   "author": {
     "name": "ziping.zhou",

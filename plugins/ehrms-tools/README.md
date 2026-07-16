@@ -4,6 +4,19 @@ EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP** 查詢工具及 **MCP �
 
 ---
 
+## v1.2.0 記憶迴路強化（codegraph）
+
+解決「查了程式入口卻沒沉澱記憶」的四層防線：
+
+1. **確定性 Stop hook**（`hooks/check_memory.py`）：解析 transcript 的 tool_use 名稱——本回合用過 `find_entry`/`trace` 但沒呼叫任何記憶工具時，回合結束前攔截一次提醒（原 prompt 型 hook 改為 command 型，不再依賴模型自覺；每回合最多提醒一次）
+2. **pending 機制**：`find_entry` 完全未命中時自動暫存問句並回傳 `pending_id`，事後 `remember(pending_id=N, entry_path=...)` 一行完成沉澱，免重打問句（存活範圍＝MCP process，不進共用 DB）
+3. **末端提醒**：`trace` 與 `verify_call_path`（verified 時）的回傳尾端帶「現在就 remember」提示——提醒出現在呼叫鏈末端而非起點
+4. **檢索修正**：bigram 集加入英數 token（excel、SP 名等高鑑別度詞）；新增「最長共同片語 ≥4 字」加權（防長問句稀釋分數）；結論排序改為 記憶/知識 優先於「僅命中 1 個觸發詞」的弱錨點（防單一高頻詞如「刷卡」劫持結論）
+
+搭配專案 CLAUDE.md 的「步驟 4.5：沉澱 codegraph 記憶」（輸出診斷報告**前**執行），構成完整迴路。
+
+---
+
 ## 目錄
 
 1. [前置需求](#前置需求)

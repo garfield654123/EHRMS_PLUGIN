@@ -74,6 +74,7 @@ async def list_tools() -> list[Tool]:
                 "當你用 find_entry/trace/讀碼確認了某個問題的實際入口後，**呼叫這個記下來**，"
                 "下次任何人問類似問題，find_entry 會直接命中、不用重掃。"
                 "比 learn 輕量：不用歸納領域與觸發詞，照實記錄即可。"
+                "若 find_entry 未命中時回傳了 pending_id，帶入 pending_id 即可省略 question（一行完成沉澱）。"
                 "★ 若使用者訂正了你先前的結論，務必以**訂正後的版本**呼叫；"
                 "若本次對話先前已記入錯誤版本，需在回覆中明確告知使用者該筆記憶 ID"
                 "（寫入成功時會回傳），供日後驗證工具標記 rejected。"
@@ -81,11 +82,12 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "question": {"type": "string", "description": "使用者的問題原文（中文，照實記錄）"},
+                    "question": {"type": "string", "description": "使用者的問題原文（中文，照實記錄；有 pending_id 時可省略）"},
                     "entry_path": {"type": "string", "description": "確認的入口類別/檔案路徑"},
                     "entry_method": {"type": "string", "description": "確認的入口函式（可選）"},
+                    "pending_id": {"type": "integer", "description": "find_entry 未命中時回傳的待沉澱記錄 ID（帶入即免填 question）"},
                 },
-                "required": ["question", "entry_path"],
+                "required": ["entry_path"],
             },
         ),
         Tool(
@@ -140,7 +142,8 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
         return _text(cg.verify_call_path(arguments["src_method"], arguments["dst"]))
     if name == "remember":
         return _text(cg.remember(
-            arguments["question"], arguments["entry_path"], arguments.get("entry_method", "")))
+            arguments.get("question", ""), arguments["entry_path"],
+            arguments.get("entry_method", ""), arguments.get("pending_id")))
     if name == "remember_fact":
         return _text(cg.remember_fact(
             arguments["topic"], arguments["fact"], arguments.get("related_path", "")))
