@@ -367,7 +367,7 @@ def remember(question, entry_path, entry_method=""):
         eid, created = mem.add_episode(question, entry_path, entry_method, sha)
         if created:
             m = f" :: `{entry_method}`" if entry_method else ""
-            return (f"✅ 已記住：「{question}」→ `{entry_path}`{m}\n"
+            return (f"✅ 已記住（記憶 ID {eid}）：「{question}」→ `{entry_path}`{m}\n"
                     f"之後全團隊查類似問題時，find_entry 會直接提示這個入口。")
         return f"✅ 相同記憶已存在（ID {eid}），確認次數 +1（信心累積）。"
     except Exception as e:
@@ -384,7 +384,7 @@ def remember_fact(topic, fact, related_path=""):
         kid, created = mem.add_knowledge(topic, fact, related_path)
         if created:
             ref = f"（相關程式：`{related_path}`）" if related_path else ""
-            return (f"✅ 已記住系統知識【{topic}】{ref}\n{fact}\n"
+            return (f"✅ 已記住系統知識（記憶 ID {kid}）【{topic}】{ref}\n{fact}\n"
                     f"之後全團隊問到相關主題時，find_entry 會一併帶出這則知識。")
         return f"✅ 相同知識已存在（ID {kid}），確認次數 +1（信心累積）。"
     except Exception as e:

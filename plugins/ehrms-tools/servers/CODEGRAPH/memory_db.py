@@ -171,12 +171,15 @@ def add_memory(mem_type, topic, content, entry_path="", entry_method="", meta=No
             invalidate_cache()
             return row[0], False
     cur.execute(
+        f"SET NOCOUNT ON; "
         f"INSERT INTO {T_MEMORY}(MEM_TYPE,TOPIC,CONTENT,ENTRY_PATH,ENTRY_METHOD,META,CREATED_BY)"
-        f" VALUES (?,?,?,?,?,?,?)",
+        f" VALUES (?,?,?,?,?,?,?); "
+        f"SELECT CAST(SCOPE_IDENTITY() AS INT)",
         (mem_type, topic or None, content, entry_path or None, entry_method or None,
          json.dumps(meta, ensure_ascii=False) if meta else None, _user()))
+    new_id = cur.fetchone()[0]
     invalidate_cache()
-    return None, True
+    return new_id, True
 
 
 # ── 相容包裝：維持 codegraph_core 既有呼叫介面 ─────────────
