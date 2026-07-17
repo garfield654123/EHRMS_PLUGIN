@@ -84,10 +84,10 @@ def load_all():
     rows = []
     for r in cur.execute(
             f"SELECT ID,MEM_TYPE,TOPIC,CONTENT,KEYWORDS,FUNC_PATH,ENTRY_PATH,ENTRY_METHOD,"
-            f"SUPERSEDES_ID,REF_KEY,SOURCE,INDEX_SHA,CREATED_BY,CREATED_AT,"
+            f"SUPERSEDES_ID,REF_KEY,SOURCE,CREATED_BY,CREATED_AT,"
             f"HIT_COUNT,LAST_HIT_AT,REVIEW_STATUS,META FROM {T}"):
         try:
-            meta = json.loads(r[17]) if r[17] else {}
+            meta = json.loads(r[16]) if r[16] else {}
         except Exception:
             meta = {}
         rows.append({
@@ -95,10 +95,10 @@ def load_all():
             "keywords": r[4] or "", "func_path": r[5] or "",
             "entry_path": r[6] or "", "entry_method": r[7] or "",
             "supersedes": r[8], "ref_key": r[9] or "", "source": r[10] or "",
-            "index_sha": r[11] or "", "created_by": r[12] or "",
-            "created_at": str(r[13])[:10],
-            "hits": r[14], "last_hit": str(r[15])[:10] if r[15] else "",
-            "review": r[16] or "pending", "meta": meta,
+            "created_by": r[11] or "",
+            "created_at": str(r[12])[:10],
+            "hits": r[13], "last_hit": str(r[14])[:10] if r[14] else "",
+            "review": r[15] or "pending", "meta": meta,
         })
     _cache["all"] = (now, rows)
     return rows
@@ -106,18 +106,18 @@ def load_all():
 
 def insert_memory(mem_type, topic, content, keywords="", func_path="",
                   entry_path="", entry_method="", supersedes_id=None,
-                  ref_key="", source="", index_sha="", meta=None):
+                  ref_key="", source="", meta=None):
     """插入一筆記憶，回傳新 ID。"""
     cur = _get_conn().cursor()
     cur.execute(
         f"SET NOCOUNT ON; "
         f"INSERT INTO {T}(MEM_TYPE,TOPIC,CONTENT,KEYWORDS,FUNC_PATH,ENTRY_PATH,ENTRY_METHOD,"
-        f"SUPERSEDES_ID,REF_KEY,SOURCE,INDEX_SHA,CREATED_BY,META)"
-        f" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?); "
+        f"SUPERSEDES_ID,REF_KEY,SOURCE,CREATED_BY,META)"
+        f" VALUES (?,?,?,?,?,?,?,?,?,?,?,?); "
         f"SELECT CAST(SCOPE_IDENTITY() AS INT)",
         (mem_type, topic, content, keywords or None, func_path or None,
          entry_path or None, entry_method or None, supersedes_id,
-         ref_key or None, source or None, index_sha or None, created_by(),
+         ref_key or None, source or None, created_by(),
          json.dumps(meta, ensure_ascii=False) if meta else None))
     new_id = cur.fetchone()[0]
     invalidate_cache()

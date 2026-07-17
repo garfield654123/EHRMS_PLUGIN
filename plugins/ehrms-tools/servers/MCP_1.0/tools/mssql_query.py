@@ -11,7 +11,7 @@ from utils.session_manager import get_session_manager
 
 def _is_read_only_query(query: str) -> bool:
     """只放行單一 SELECT / WITH 語句。
-    DB 帳號因 codegraph 記憶功能被授予特定表的 INSERT/UPDATE 權限，
+    DB 帳號因 ehrms-memory 記憶功能被授予 HRMS_MEMORY 表的 INSERT/UPDATE 權限，
     此工具必須在程式端維持唯讀，避免成為寫入通道。"""
     statements = [s for s in sqlparse.split(query) if s.strip()]
     if len(statements) != 1:

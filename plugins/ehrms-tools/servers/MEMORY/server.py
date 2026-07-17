@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """EHRMS memory MCP server（stdio）——團隊共用記憶（HRMS_MEMORY）
 ① recall：檢索記憶（命中即強化）   ② remember：寫入記憶（去重＋supersede 訂正）
-程式圖譜（find_entry/trace/verify_call_path）由 ehrms-codegraph MCP 提供。
 """
 import asyncio
 from mcp.server import Server
@@ -24,7 +23,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="recall",
             description=(
-                "檢索團隊共用記憶。查案/排查流程的**第一步**呼叫（在 find_entry 之前）。"
+                "檢索團隊共用記憶。查案/排查流程的**第一步**呼叫。"
                 "回傳兩組：System（系統使用知識，客服視角——操作順序、前置條件、功能行為）"
                 "與 Engineer（程式入口與邏輯要點，維運視角）。命中會自動累計引用次數。"
             ),

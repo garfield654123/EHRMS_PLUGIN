@@ -1,19 +1,18 @@
 # ehrms-tools Plugin 使用說明
 
-EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**codegraph 程式圖譜**、**ehrms-memory 團隊共用記憶** 及 **MCP 設定管理 Skill**。
+EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**ehrms-memory 團隊共用記憶** 及 **MCP 設定管理 Skill**。
 
 ---
 
-## v2.0.0 架構重構：圖譜與記憶徹底分離
+## v3.0.0：移除 codegraph 程式圖譜
 
-v1.x 的 codegraph 把「程式圖譜」和「記憶」混在同一組工具裡（find_entry 一半查程式、一半吐記憶），v2.0.0 打掉重練，拆成兩個職責單一的 MCP：
+v2.x 曾提供 `ehrms-codegraph` 程式圖譜 MCP（find_entry / trace / verify_call_path），v3.0.0 起整個移除，plugin 剩三個 MCP：`ehrms-database`、`EHRMS-jira-mcp`、`ehrms-memory`。記憶表 `HRMS_MEMORY` 的 `INDEX_SHA` 欄位（原記錄 codegraph 索引版本）同步停用，程式不再讀寫；既有 DB 的該欄位可由 DBA DROP（見 `hrms_memory.sql` 頂部說明）。
 
-| MCP | 職責 | 資料來源 |
-|-----|------|----------|
-| `ehrms-codegraph` | 程式地圖：找入口、追呼叫鏈、驗證呼叫（**無記憶邏輯、無 DB 依賴**） | `codegraph.sqlite`＋`anchors.json`（git 版控） |
-| `ehrms-memory` | 團隊共用記憶：檢索（recall）、沉澱（remember） | MSSQL `HRMS_MEMORY` 表 |
+---
 
-記憶設計要點：
+## ehrms-memory 團隊共用記憶
+
+`ehrms-memory` MCP 提供檢索（recall）與沉澱（remember），資料存於 MSSQL `HRMS_MEMORY` 表。設計要點：
 
 1. **兩型記憶**：`System`＝系統使用層知識（客服視角：操作順序、前置條件、功能行為）；`Engineer`＝程式入口與邏輯要點（維運視角，entry_path 必填）
 2. **寫入端把關**：`remember` 內建確定性去重——高相似同結論 → 不新增、舊筆信心 +1；高相似不同結論 → 要求明確帶 `supersedes`（訂正）或 `force`（新議題）
@@ -296,18 +295,6 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 
 ---
 
-### codegraph MCP 工具（純程式圖譜）
-
-透過 `ehrms-codegraph` 提供（無 DB 依賴，只讀 `codegraph.sqlite` 與 `anchors.json`）：
-
-| 工具 | 說明 |
-|------|------|
-| `find_entry` | 敘述 → 領域錨點路由 → 程式入口候選（不含記憶） |
-| `trace` | 從函式沿呼叫鏈追蹤（函式→函式、函式→SP） |
-| `verify_call_path` | 驗證某條呼叫是否存在（反幻覺閘門，永不回「一定沒有」） |
-
----
-
 ### memory MCP 工具（團隊共用記憶）
 
 透過 `ehrms-memory` 提供（需 MSSQL_* 環境變數；`JIRA_EMAIL` 決定記錄者身分）：
@@ -347,7 +334,7 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 plugins/ehrms-tools/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin 基本資訊
-├── .mcp.json                # MCP 伺服器設定（4 個 MCP）
+├── .mcp.json                # MCP 伺服器設定（3 個 MCP）
 ├── servers/
 │   ├── JIRA_MCP/            # JIRA MCP 伺服器原始碼
 │   │   └── jira_mcp/
@@ -360,11 +347,6 @@ plugins/ehrms-tools/
 │   │   ├── config.py        # 設定讀取（環境變數）
 │   │   ├── tools/           # 各工具實作模組
 │   │   └── utils/           # 共用工具（DB 連線池、格式化、Session 管理）
-│   ├── CODEGRAPH/           # 程式圖譜 MCP（純圖譜，無記憶）
-│   │   ├── server.py        # find_entry / trace / verify_call_path
-│   │   ├── codegraph_core.py
-│   │   ├── anchors.json     # 領域錨點（git 版控的路由層）
-│   │   └── codegraph.sqlite # 呼叫圖索引（METHOD/EDGE）
 │   └── MEMORY/              # 團隊共用記憶 MCP
 │       ├── server.py        # recall / remember
 │       ├── memory_core.py   # 檢索評分、去重管線、supersede 訂正

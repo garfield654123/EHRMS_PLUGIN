@@ -12,7 +12,7 @@ description: 定期對團隊共用記憶表 HRMS_MEMORY 去蕪存菁：合併重
 ```sql
 -- 全貌
 SELECT ID, MEM_TYPE, TOPIC, LEFT(CONTENT,100) AS PREVIEW, KEYWORDS,
-       ENTRY_PATH, SUPERSEDES_ID, REF_KEY, INDEX_SHA,
+       ENTRY_PATH, SUPERSEDES_ID, REF_KEY,
        CREATED_BY, CONVERT(varchar(16), CREATED_AT, 120) AS CREATED_AT,
        HIT_COUNT, CONVERT(varchar(10), LAST_HIT_AT, 120) AS LAST_HIT,
        REVIEW_STATUS
@@ -27,8 +27,8 @@ SELECT * FROM dbo.vwHRMS_MEMORY_ACTIVE ORDER BY MEM_TYPE, TOPIC, ID;
 ## 步驟 2：找四類候選（只看有效記憶）
 
 1. **重複**：同 MEM_TYPE 下 TOPIC 相近、或 KEYWORDS 高度重疊、或 CONTENT 講同一件事的多筆。
-2. **矛盾**：同主題但結論互斥（不同入口、不同行為描述）——需要查證哪個對（可用 ehrms-codegraph 的 `verify_call_path` 驗證入口是否存在）。
-3. **過時**（僅 Engineer 型）：`INDEX_SHA` 落後目前 codegraph 索引版本很多、且內容含行號等易失效細節的——優先重驗。
+2. **矛盾**：同主題但結論互斥（不同入口、不同行為描述）——需要查證哪個對（到 EHRMS 原始碼直接確認 `ENTRY_PATH` 檔案與函式是否存在）。
+3. **過時**（僅 Engineer 型）：建立時間久遠、且內容含行號等易失效細節的——優先對照現行原始碼重驗。
 4. **殭屍**：建立超過 3 個月且 `HIT_COUNT = 0`（從未被 recall 引用）——評估是否還有保留價值。
 
 ## 步驟 3：向使用者提出處置清單並確認

@@ -11,9 +11,7 @@
 - 訂正   remember(supersedes=舊ID)：插新筆取代舊筆，讀取端排除被取代者
 - 固化   memory-curate skill 定期去蕪存菁（讀走 DB MCP、寫走本模組的 supersede）
 """
-import os
 import re
-import sqlite3
 from difflib import SequenceMatcher
 
 import memory_db as db
@@ -180,23 +178,6 @@ def _dup_sim(topic, content, keywords, row):
     return min(1.0, sim)
 
 
-def _codegraph_sha():
-    """Engineer 記憶寫入當下的 codegraph 索引版本（判斷過時用；讀不到就空）。"""
-    path = os.getenv("CODEGRAPH_DB", "")
-    if not path or not os.path.exists(path):
-        return ""
-    try:
-        con = sqlite3.connect(path)
-        try:
-            r = con.execute("SELECT META_VALUE FROM HRMS_CODE_INDEX_META "
-                            "WHERE META_KEY='LAST_GIT_SHA'").fetchone()
-            return (r[0][:12] if r and r[0] else "")
-        finally:
-            con.close()
-    except Exception:
-        return ""
-
-
 def _parse_supersedes(s):
     ids = []
     for part in str(s).replace("，", ",").split(","):
@@ -264,13 +245,12 @@ def remember(kind, topic, content, keywords="", func_path="", entry_path="",
                     f"若本筆是訂正 → 帶 `supersedes={best['id']}` 重新呼叫；"
                     f"若是不同議題 → 帶 `force=true`。")
 
-    sha = _codegraph_sha() if kind == "Engineer" else ""
     meta = {"supersedes_all": sup_ids[1:]} if len(sup_ids) > 1 else None
     try:
         new_id = db.insert_memory(
             kind, topic, content, keywords, func_path, entry_path, entry_method,
             supersedes_id=sup_ids[0] if sup_ids else None,
-            ref_key=ref_key, source=source, index_sha=sha, meta=meta)
+            ref_key=ref_key, source=source, meta=meta)
     except Exception as e:
         return (f"⚠️ 記憶寫入失敗：{e}\n"
                 f"請確認 HRMS_MEMORY 資料表已建立，且帳號有 INSERT 權限。")

@@ -21,15 +21,6 @@
       "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
     }
   },
-  "ehrms-codegraph": {
-    "command": "py",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/server.py"],
-    "env": {
-      "MCP_MODE": "stdio",
-      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH",
-      "CODEGRAPH_DB": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/codegraph.sqlite"
-    }
-  },
   "ehrms-memory": {
     "command": "py",
     "args": ["${CLAUDE_PLUGIN_ROOT}/servers/MEMORY/server.py"],
@@ -40,8 +31,7 @@
       "MSSQL_DATABASE": "${MSSQL_DATABASE}",
       "MSSQL_USERNAME": "${MSSQL_USERNAME}",
       "MSSQL_PASSWORD": "${MSSQL_PASSWORD}",
-      "JIRA_EMAIL": "${JIRA_EMAIL}",
-      "CODEGRAPH_DB": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/codegraph.sqlite"
+      "JIRA_EMAIL": "${JIRA_EMAIL}"
     }
   }
 }

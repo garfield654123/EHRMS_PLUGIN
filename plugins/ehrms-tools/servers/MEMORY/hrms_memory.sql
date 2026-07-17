@@ -26,6 +26,12 @@
      episode/fact 存量僅 10 筆，如需保留請人工挑選後改寫入本表
      （episode→Engineer、fact→依內容判 System/Engineer，TOPIC 必填）。
    - HRMS_MEMORY_V1_BAK 確認不再需要後由 DBA 歸檔或 DROP。
+
+   INDEX_SHA 欄位處置（2026-07-17 移除 codegraph 後）：
+   - 本表曾有 INDEX_SHA VARCHAR(12) NULL（codegraph 索引版本），
+     codegraph 已自 plugin 移除，程式不再讀寫此欄。
+   - 若 DB 中已依舊版腳本建表，該欄可保留（NULL 無害）或由 DBA 一併 DROP：
+     ALTER TABLE dbo.HRMS_MEMORY DROP COLUMN INDEX_SHA;
    ===================================================================== */
 
 ------------------------------------------------------------------
@@ -54,7 +60,6 @@ CREATE TABLE dbo.HRMS_MEMORY (
     -- ── 溯源（provenance）────────────────────────────────
     REF_KEY        NVARCHAR(50)   NULL,       -- 來源案件（EHRMSONE-XXXXX）
     SOURCE         NVARCHAR(50)   NULL,       -- 產生途徑（skill 名 / 'curate'）
-    INDEX_SHA      VARCHAR(12)    NULL,       -- Engineer 記憶當下的 codegraph 索引版本
     CREATED_BY     NVARCHAR(100)  NOT NULL,   -- Jira 帳號（ziping.zhou），非 Windows 帳號
     CREATED_AT     DATETIME2(0)   NOT NULL CONSTRAINT DF_HRMSMEM_CRE DEFAULT SYSDATETIME(),
 
