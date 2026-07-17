@@ -1,6 +1,7 @@
 """Jira API client for making authenticated requests."""
 
 import base64
+import json as _json
 import os
 from typing import Any, Optional
 import httpx
@@ -67,39 +68,205 @@ class JiraClient:
         """執行 POST 請求"""
         return await self._request("POST", endpoint, json_data=json_data)
 
+    # search_issues 預設抓取的精簡欄位。
+    # 不可用 *all：EHRMSONE 掛了數百個共用 customfield（多為流程範本文字），
+    # 單張 Issue 的完整 JSON 可達 30 萬字元，會超過 MCP 輸出上限。
+    DEFAULT_SEARCH_FIELDS = [
+        "summary", "status", "assignee", "reporter", "priority",
+        "issuetype", "created", "updated", "duedate", "labels",
+        "components", "description", "attachment", "parent",
+    ]
+    MAX_SEARCH_RESULTS = 50   # 單次搜尋上限（防上下文爆量）
+    MAX_DESC_CHARS = 600      # 清單場景的描述截斷長度；全文請查單筆
+    MAX_EXTRA_CHARS = 800     # 額外指定欄位的截斷長度
+
     async def search_issues(
         self,
         jql: str,
         fields: Optional[list[str]] = None,
         max_results: int = 50,
-        start_at: int = 0,
+        next_page_token: Optional[str] = None,
         expand: Optional[list[str]] = None
     ) -> dict[str, Any]:
         """
-        使用 JQL 搜尋 Issues (符合 Jira REST API v3 標準)
+        使用 JQL 搜尋 Issues（v3 search/jql 端點）
+
+        分頁：search/jql 使用 nextPageToken（不支援 startAt）——
+        回傳含 next_page_token 時，帶回原參數即可取得下一頁。
+
+        輸出永遠是精簡結構（防上下文爆量）：fields 只能「加欄位」，
+        追加欄位一律 ADF→純文字並截斷，絕不回傳 Jira 原始 JSON。
 
         Args:
             jql: JQL 查詢字串
-            fields: 要返回的欄位列表
-            max_results: 最大結果數量
-            start_at: 起始位置
-            expand: 要展開的資源 (例如: ['changelog', 'renderedFields'])
+            fields: 額外欄位（如 customfield_12722），會附加在精簡結構上
+            max_results: 單頁筆數（上限 MAX_SEARCH_RESULTS）
+            next_page_token: 上一頁回傳的翻頁 token
+            expand: 要展開的資源
         """
+        max_results = min(int(max_results or 50), self.MAX_SEARCH_RESULTS)
+        extra = [x for x in (fields or []) if x and not x.startswith("*")]
         params = {
             "jql": jql,
             "maxResults": max_results,
-            "startAt": start_at,
+            "fields": ",".join(self.DEFAULT_SEARCH_FIELDS + extra),
         }
-
-        if fields:
-            params["fields"] = ",".join(fields)
-        else:
-            params["fields"] = "*all"
-
+        if next_page_token:
+            params["nextPageToken"] = next_page_token
         if expand:
             params["expand"] = ",".join(expand)
 
-        return await self.get("search/jql", params=params)
+        result = await self.get("search/jql", params=params)
+
+        issues = [self._simplify_issue(i, extra) for i in result.get("issues", [])]
+        out: dict[str, Any] = {"count": len(issues), "issues": issues}
+        if not result.get("isLast", True) and result.get("nextPageToken"):
+            out["next_page_token"] = result["nextPageToken"]
+            out["note"] = "尚有更多結果，帶 next_page_token 再查一次可取得下一頁"
+        return out
+
+    @classmethod
+    def _field_to_text(cls, v: Any) -> Any:
+        """任意 Jira 欄位值 → 精簡文字（ADF 轉純文字、物件取名稱）"""
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            if v.get("type") == "doc":
+                return cls._adf_to_text(v)
+            for k in ("displayName", "name", "value"):
+                if k in v:
+                    return v[k]
+            return _json.dumps(v, ensure_ascii=False)[:300]
+        if isinstance(v, list):
+            return [cls._field_to_text(x) for x in v]
+        return v
+
+    def _simplify_issue(self, issue: dict[str, Any],
+                        extra_fields: Optional[list[str]] = None) -> dict[str, Any]:
+        """將 Issue 壓縮為精簡結構，ADF 描述轉純文字並截斷"""
+        f = issue.get("fields", {})
+        desc = self._adf_to_text(f.get("description")) if f.get("description") else ""
+        if len(desc) > self.MAX_DESC_CHARS:
+            desc = (desc[:self.MAX_DESC_CHARS]
+                    + f"…（已截斷，全文 {len(desc)} 字，需要全文請用 get_issue 查單筆）")
+        simplified = {
+            "key": issue.get("key"),
+            "summary": f.get("summary", ""),
+            "status": (f.get("status") or {}).get("name", ""),
+            "assignee": (f.get("assignee") or {}).get("displayName", ""),
+            "reporter": (f.get("reporter") or {}).get("displayName", ""),
+            "priority": (f.get("priority") or {}).get("name", ""),
+            "issue_type": (f.get("issuetype") or {}).get("name", ""),
+            "created": (f.get("created") or "")[:10],
+            "updated": (f.get("updated") or "")[:10],
+            "duedate": f.get("duedate"),
+            "labels": f.get("labels") or [],
+            "components": [c.get("name", "") for c in f.get("components") or []],
+            "description": desc,
+            "attachments": [a.get("filename", "") for a in f.get("attachment") or []],
+        }
+        parent = f.get("parent")
+        if parent:
+            simplified["parent"] = parent.get("key")
+        for name in extra_fields or []:
+            val = self._field_to_text(f.get(name))
+            if isinstance(val, str) and len(val) > self.MAX_EXTRA_CHARS:
+                val = val[:self.MAX_EXTRA_CHARS] + "…（已截斷）"
+            simplified[name] = val
+        return simplified
+
+    @staticmethod
+    def _adf_to_text(adf: Any) -> str:
+        """將 Atlassian Document Format (ADF) 轉為純文字。
+
+        涵蓋維運單常見節點：段落/標題/清單（含巢狀、起始編號）/程式碼/引用/
+        panel/表格/圖片與附件（輸出佔位符，AI 才知道有圖可抓）/mention/
+        hardBreak/分隔線/expand。未知節點遞迴取其子內容，確保不吞字。"""
+        if not isinstance(adf, dict):
+            return str(adf) if adf is not None else ""
+        if "content" not in adf:
+            return ""
+
+        def media_tag(n):
+            a = n.get("attrs", {})
+            name = a.get("alt") or (a.get("id") or "")[:8]
+            return f"[圖片/附件: {name}]"
+
+        def inline(nodes):
+            parts = []
+            for n in nodes or []:
+                t = n.get("type")
+                if t == "text":
+                    parts.append(n.get("text", ""))
+                elif t == "hardBreak":
+                    parts.append("\n")
+                elif t == "mention":
+                    parts.append(n.get("attrs", {}).get("text") or "@?")
+                elif t == "emoji":
+                    parts.append(n.get("attrs", {}).get("text", ""))
+                elif t == "inlineCard":
+                    parts.append(n.get("attrs", {}).get("url", ""))
+                elif t == "media":
+                    parts.append(media_tag(n))
+                else:
+                    parts.append(inline(n.get("content")))
+            return "".join(parts)
+
+        def list_item(li, indent, prefix):
+            out = []
+            for b in blocks(li.get("content"), ""):
+                if not out:
+                    out.append(indent + prefix + b)
+                else:
+                    out.append(indent + " " * len(prefix) + b)
+            return out or [indent + prefix.rstrip()]
+
+        def blocks(nodes, indent=""):
+            lines = []
+            for n in nodes or []:
+                t = n.get("type")
+                c = n.get("content")
+                if t == "paragraph":
+                    lines.append(indent + inline(c))
+                elif t == "heading":
+                    lv = n.get("attrs", {}).get("level", 1)
+                    lines.append(indent + "#" * lv + " " + inline(c))
+                elif t == "bulletList":
+                    for li in c or []:
+                        lines.extend(list_item(li, indent, "- "))
+                elif t == "orderedList":
+                    start = n.get("attrs", {}).get("order", 1)
+                    for i, li in enumerate(c or []):
+                        lines.extend(list_item(li, indent, f"{start + i}. "))
+                elif t == "codeBlock":
+                    lines.append(indent + "```")
+                    lines.extend(indent + ln for ln in inline(c).split("\n"))
+                    lines.append(indent + "```")
+                elif t == "blockquote":
+                    lines.extend(indent + "> " + ln for ln in blocks(c))
+                elif t == "panel":
+                    ptype = n.get("attrs", {}).get("panelType", "info")
+                    lines.append(indent + f"【{ptype}】")
+                    lines.extend(blocks(c, indent))
+                elif t == "table":
+                    for row in c or []:
+                        cells = [" ".join(blocks(cell.get("content"))).strip()
+                                 for cell in row.get("content") or []]
+                        lines.append(indent + "| " + " | ".join(cells) + " |")
+                elif t in ("mediaSingle", "mediaGroup"):
+                    lines.append(indent + inline(c))
+                elif t == "rule":
+                    lines.append(indent + "---")
+                elif t in ("expand", "nestedExpand"):
+                    lines.append(indent + "▸ " + n.get("attrs", {}).get("title", ""))
+                    lines.extend(blocks(c, indent))
+                else:
+                    txt = inline(c)
+                    if txt:
+                        lines.append(indent + txt)
+            return lines
+
+        return "\n".join(blocks(adf["content"]))
 
     async def get_issue(
         self,
@@ -128,32 +295,7 @@ class JiraClient:
         issue = await self.get(f"issue/{issue_key}", params=params)
 
         if plain_text:
-            def adf_to_text(adf):
-                if not isinstance(adf, dict) or "content" not in adf:
-                    return str(adf)
-                lines = []
-                for block in adf["content"]:
-                    t = block.get("type")
-                    if t == "paragraph":
-                        lines.append("".join([c.get("text", "") for c in block.get("content", [])]))
-                    elif t == "heading":
-                        level = block.get("attrs", {}).get("level", 1)
-                        prefix = "#" * level
-                        lines.append(f"{prefix} " + "".join([c.get("text", "") for c in block.get("content", [])]))
-                    elif t == "bulletList":
-                        for li in block.get("content", []):
-                            for p in li.get("content", []):
-                                lines.append("- " + "".join([c.get("text", "") for c in p.get("content", [])]))
-                    elif t == "orderedList":
-                        idx = 1
-                        for li in block.get("content", []):
-                            for p in li.get("content", []):
-                                lines.append(f"{idx}. " + "".join([c.get("text", "") for c in p.get("content", [])]))
-                                idx += 1
-                    elif t == "codeBlock":
-                        code = "\n".join([c.get("text", "") for c in block.get("content", [])])
-                        lines.append(f"```\n{code}\n```")
-                return "\n".join(lines)
+            adf_to_text = self._adf_to_text
 
             for k, v in issue.get("fields", {}).items():
                 if isinstance(v, dict) and v.get("type") == "doc" and v.get("version") == 1:
@@ -192,6 +334,37 @@ class JiraClient:
     async def get_issue_comments(self, issue_key: str) -> dict[str, Any]:
         """取得 Issue 的所有評論"""
         return await self.get(f"issue/{issue_key}/comment")
+
+    async def get_issue_basic(self, issue_key: str) -> dict[str, Any]:
+        """
+        取得 Issue 的基本欄位與評論（輕量查詢）
+
+        只抓取基本欄位（透過 get_issue_summary）與評論，不抓 *all 全欄位，
+        評論 body 會由 ADF 轉為純文字以節省資源。
+
+        Args:
+            issue_key: Issue 的 Key (例如: PROJ-123)
+
+        Returns:
+            dict: 基本欄位 + comment_total + comments[]
+        """
+        summary = await self.get_issue_summary(issue_key)
+        comments_raw = await self.get_issue_comments(issue_key)
+
+        comments = []
+        for c in comments_raw.get("comments", []):
+            comments.append({
+                "author": (c.get("author") or {}).get("displayName", ""),
+                "created": (c.get("created") or "")[:10],
+                "updated": (c.get("updated") or "")[:10],
+                "body": self._adf_to_text(c.get("body")),
+            })
+
+        return {
+            **summary,
+            "comment_total": comments_raw.get("total", len(comments)),
+            "comments": comments,
+        }
 
     async def get_issue_worklogs(self, issue_key: str) -> dict[str, Any]:
         """取得 Issue 的所有工時記錄"""
@@ -328,37 +501,62 @@ class JiraClient:
             issue_key: Issue 的 Key (例如: PROJ-123)
             body: 評論內容（純文字，將轉為 ADF 格式）
         """
-        adf_body = {
-            "version": 1,
-            "type": "doc",
-            "content": [
-                {
-                    "type": "paragraph",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": body
-                        }
-                    ]
-                }
-            ]
-        }
+        # 逐行拆成段落：單一 text node 內的 \n 不會被 Jira 渲染成換行
+        content = []
+        for line in body.split("\n"):
+            para: dict[str, Any] = {"type": "paragraph", "content": []}
+            if line:
+                para["content"] = [{"type": "text", "text": line}]
+            content.append(para)
+        adf_body = {"version": 1, "type": "doc", "content": content}
         return await self.post(f"issue/{issue_key}/comment", json_data={"body": adf_body})
 
     async def get_issue_transitions(self, issue_key: str) -> dict[str, Any]:
         """取得 Issue 的可用轉換狀態 (符合 Jira REST API v3 標準)"""
         return await self.get(f"issue/{issue_key}/transitions")
 
-    async def get_issue_changelog(self, issue_key: str) -> dict[str, Any]:
-        """取得 Issue 的變更歷史 (符合 Jira REST API v3 標準)"""
-        return await self.get(f"issue/{issue_key}/changelog")
+    async def get_issue_changelog(self, issue_key: str, max_pages: int = 10) -> dict[str, Any]:
+        """取得 Issue 完整變更歷史（自動翻頁＋精簡輸出）。
 
-    async def get_user_info(self, username: Optional[str] = None) -> dict[str, Any]:
-        """取得用戶資訊 (符合 Jira REST API v3 標準)"""
+        changelog 端點每頁上限 100 筆，依 isLast 自動翻頁；
+        輸出精簡為 (時間, 操作者, 欄位 from→to)，避免原始 JSON 撐爆上下文。"""
+        start, entries = 0, []
+        for _ in range(max_pages):
+            page = await self.get(f"issue/{issue_key}/changelog",
+                                  params={"startAt": start, "maxResults": 100})
+            values = page.get("values", [])
+            for h in values:
+                entries.append({
+                    "at": (h.get("created") or "")[:16].replace("T", " "),
+                    "by": (h.get("author") or {}).get("displayName", ""),
+                    "changes": [
+                        {"field": i.get("field"),
+                         "from": i.get("fromString"), "to": i.get("toString")}
+                        for i in h.get("items", [])
+                    ],
+                })
+            if page.get("isLast", True) or not values:
+                break
+            start += len(values)
+        return {"issue": issue_key, "total": len(entries), "changelog": entries}
+
+    async def get_user_info(self, username: Optional[str] = None) -> Any:
+        """取得用戶資訊。
+
+        Jira Cloud v3 已移除 GET /user 的 username 參數（GDPR），
+        指定使用者時改走 user/search?query=（可用 email 或顯示名稱模糊查詢）。"""
+        def slim(u: dict) -> dict:
+            return {
+                "accountId": u.get("accountId"),
+                "displayName": u.get("displayName"),
+                "emailAddress": u.get("emailAddress", ""),
+                "active": u.get("active"),
+            }
         if username:
-            return await self.get("user", params={"username": username})
-        else:
-            return await self.get("myself")
+            users = await self.get("user/search",
+                                   params={"query": username, "maxResults": 10})
+            return [slim(u) for u in users]
+        return slim(await self.get("myself"))
 
     async def get_user_issues(
         self,

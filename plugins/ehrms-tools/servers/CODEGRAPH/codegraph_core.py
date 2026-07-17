@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
-"""codegraph 核心邏輯：
-- find_entry：完全走記憶層（HRMS_MEMORY 優先，anchors.json / cases.json 備援）
-- trace / verify_call_path：唯讀 sqlite 呼叫圖索引（METHOD/EDGE）"""
-import os, re, json, sqlite3
-from difflib import SequenceMatcher
+"""codegraph 核心邏輯（純程式圖譜）：
+- find_entry：敘述 → 領域錨點（anchors.json）＋歷史前例（cases.json）→ 入口候選
+- trace / verify_call_path：唯讀 sqlite 呼叫圖索引（METHOD/EDGE）
 
-import memory_db as mem
+本模組只回答「程式長什麼樣、誰呼叫誰」，不碰任何記憶——
+記憶（recall/remember）由獨立的 ehrms-memory MCP 負責，流程順序由 skill 編排。
+"""
+import os
+import re
+import json
+import sqlite3
 
 DB_PATH = os.getenv("CODEGRAPH_DB") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "codegraph.sqlite")
-# DB 不可用時的本地備援（git 友善 json）
+# 領域錨點：git 版控的路由層（低頻變動、隨 plugin 發版分發）
 ANCHORS_JSON = os.getenv("CODEGRAPH_ANCHORS") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "anchors.json")
 CASES_JSON = os.getenv("CODEGRAPH_CASES") or os.path.join(
@@ -17,51 +21,27 @@ CASES_JSON = os.getenv("CODEGRAPH_CASES") or os.path.join(
 
 
 def _load_anchors():
-    """回傳 (anchors, synonyms, source)。
-    優先讀共用 HRMS_MEMORY（source='db'），失敗或空表退 anchors.json（'json'/'db-empty'）。"""
-    if mem.db_enabled():
-        try:
-            anchors, syns = mem.load_anchors_db()
-            if anchors:
-                return anchors, syns, "db"
-            # DB 連得上但 ANCHOR 表是空的（尚未初始化）→ 退用本地 json，避免既有錨點失效
-            if os.path.exists(ANCHORS_JSON):
-                d = json.load(open(ANCHORS_JSON, encoding="utf-8"))
-                anchors = [(a.get("domain", ""), a.get("triggers", ""), a.get("entry_path", ""),
-                            a.get("entry_methods", ""), a.get("key_tables", ""), a.get("skill", ""))
-                           for a in d.get("anchors", [])]
-                syns = [(s.get("term", ""), s.get("maps_to", "")) for s in d.get("synonyms", [])]
-                return anchors, syns, "db-empty"
-            return anchors, syns, "db"
-        except Exception:
-            pass
-    if os.path.exists(ANCHORS_JSON):
-        d = json.load(open(ANCHORS_JSON, encoding="utf-8"))
-        anchors = [(a.get("domain", ""), a.get("triggers", ""), a.get("entry_path", ""),
-                    a.get("entry_methods", ""), a.get("key_tables", ""), a.get("skill", ""))
-                   for a in d.get("anchors", [])]
-        syns = [(s.get("term", ""), s.get("maps_to", "")) for s in d.get("synonyms", [])]
-        return anchors, syns, "json"
-    return [], [], "none"
+    """回傳 (anchors, synonyms)。anchors=[(domain, triggers, entry_path, entry_methods, key_tables, skill)]"""
+    if not os.path.exists(ANCHORS_JSON):
+        return [], []
+    d = json.load(open(ANCHORS_JSON, encoding="utf-8"))
+    anchors = [(a.get("domain", ""), a.get("triggers", ""), a.get("entry_path", ""),
+                a.get("entry_methods", ""), a.get("key_tables", ""), a.get("skill", ""))
+               for a in d.get("anchors", [])]
+    syns = [(s.get("term", ""), s.get("maps_to", "")) for s in d.get("synonyms", [])]
+    return anchors, syns
 
 
 def _load_cases():
-    """回傳 [(issue, description, file)]。共用 HRMS_MEMORY 優先，退 cases.json。"""
-    if mem.db_enabled():
-        try:
-            cases = mem.load_cases()
-            if cases:
-                return cases
-        except Exception:
-            pass
-    if os.path.exists(CASES_JSON):
-        try:
-            d = json.load(open(CASES_JSON, encoding="utf-8"))
-            return [(c.get("issue", ""), c.get("desc", ""), c.get("file", ""))
-                    for c in d.get("cases", [])]
-        except Exception:
-            pass
-    return []
+    """回傳 [(issue, description, file)]，git 挖掘的歷史前例（沒有 cases.json 就是空）。"""
+    if not os.path.exists(CASES_JSON):
+        return []
+    try:
+        d = json.load(open(CASES_JSON, encoding="utf-8"))
+        return [(c.get("issue", ""), c.get("desc", ""), c.get("file", ""))
+                for c in d.get("cases", [])]
+    except Exception:
+        return []
 
 
 def _con():
@@ -69,9 +49,7 @@ def _con():
 
 
 def _bigrams(t):
-    """中文 bigram ＋ 英數 token。
-    英數 token（excel、SP/資料表名等）在本專案是高鑑別度詞彙，
-    原版只取中文 bigram 會把「自訂excel報表」拆成「自訂」「報表」而稀釋相似度。"""
+    """中文 bigram ＋ 英數 token（excel、SP/資料表名等高鑑別度詞彙）。"""
     g = set()
     for run in re.findall(r'[一-鿿]+', t):
         if len(run) == 1:
@@ -81,29 +59,6 @@ def _bigrams(t):
     for tok in re.findall(r'[A-Za-z0-9_]{2,}', t.lower()):
         g.add(tok)
     return g
-
-
-def _phrase_bonus(a, b):
-    """最長共同連續片語加權：長問句會稀釋 bigram Dice 分數，
-    但「自訂excel報表」這類 ≥4 字的連續共同片語是高鑑別度訊號，
-    值得直接加分（0.10 起，每多 1 字 +0.03，上限 0.30）。"""
-    m = SequenceMatcher(None, a, b).find_longest_match(0, len(a), 0, len(b))
-    if m.size < 4:
-        return 0.0
-    return min(0.30, 0.10 + 0.03 * (m.size - 4))
-
-
-# ── 待沉澱記錄（pending）：find_entry 未命中時自動建立，remember 帶 id 一行補記 ──
-# 存活範圍＝MCP server process（同一個 Claude Code session），不進共用 DB
-_PENDING = {}
-_PENDING_SEQ = 0
-
-
-def _add_pending(question):
-    global _PENDING_SEQ
-    _PENDING_SEQ += 1
-    _PENDING[_PENDING_SEQ] = question
-    return _PENDING_SEQ
 
 
 def _base(p):
@@ -118,7 +73,7 @@ def _sha(cur):
         return '?'
 
 
-def _index_sha():
+def index_sha():
     """讀取索引版本 SHA；sqlite 缺檔或無 META 時回 '?'（不建立空檔）。"""
     if not os.path.exists(DB_PATH):
         return '?'
@@ -129,64 +84,9 @@ def _index_sha():
         con.close()
 
 
-# ── 情節記憶：找相似的歷史查詢 ─────────────────────────────
-def similar_episodes(question, top_k=3, threshold=0.30):
-    """用中文 bigram 相似度（Dice + 包含度）比對歷史 episodes，回傳 [(score, episode)]。"""
-    qs = _bigrams(question)
-    if not qs:
-        return []
-    out = []
-    for ep in mem.load_episodes():
-        es = _bigrams(ep[1])
-        if not es:
-            continue
-        inter = len(qs & es)
-        if inter < 2:
-            continue
-        dice = 2.0 * inter / (len(qs) + len(es))
-        contain = float(inter) / min(len(qs), len(es))
-        score = max(dice, contain * 0.8) + _phrase_bonus(question, ep[1])
-        if ep[7]:  # 人工 review 通過（verified）→ 提升可信度
-            score = min(1.0, score + 0.10)
-        if score >= threshold:
-            out.append((score, ep))
-    out.sort(key=lambda x: -x[0])
-    return out[:top_k]
-
-
-# ── 語意知識：找相關的系統性知識片段 ───────────────────────
-def similar_knowledge(question, top_k=3, threshold=0.30):
-    """比對 KNOWLEDGE 表，回傳 [(score, knowledge)]。
-    FACT 內容長、問題短，整段 Dice 會被稀釋，故 TOPIC 另計一路
-    「問題覆蓋主題的比例」，與內容相似度取最大值。"""
-    qs = _bigrams(question)
-    if not qs:
-        return []
-    out = []
-    for kn in mem.load_knowledge():
-        ts = _bigrams(kn[1])                 # TOPIC
-        ks = _bigrams(kn[1] + " " + kn[2])   # TOPIC + FACT
-        if not ks:
-            continue
-        inter = len(qs & ks)
-        topic_hit = len(qs & ts)
-        if inter < 2 and topic_hit < 1:
-            continue
-        dice = 2.0 * inter / (len(qs) + len(ks))
-        contain = float(inter) / min(len(qs), len(ks))
-        topic_contain = float(topic_hit) / len(ts) if ts else 0.0
-        score = max(dice, contain * 0.8, topic_contain) + _phrase_bonus(question, kn[1])
-        if kn[6]:  # 人工 review 通過（verified）→ 提升可信度
-            score = min(1.0, score + 0.10)
-        if score >= threshold:
-            out.append((score, kn))
-    out.sort(key=lambda x: -x[0])
-    return out[:top_k]
-
-
 # ── ① 找入口 ──────────────────────────────────────────────
 def find_entry(description, top_k=3):
-    anchors, syns, src = _load_anchors()
+    anchors, syns = _load_anchors()
     text = description
     for term, mp in syns:
         if term and term in description:
@@ -198,7 +98,7 @@ def find_entry(description, top_k=3):
         if hit:
             A.append((len(hit), d, ep, em, kt, sk))
     A.sort(key=lambda x: -x[0])
-    # ② CASE：bigram + IDF（df>50 當雜訊丟）— 來源 HRMS_MEMORY('case') 或 cases.json
+    # ② CASE：bigram + IDF（df>50 當雜訊丟）
     cases = _load_cases()
     score = {}
     for g in _bigrams(description):
@@ -213,40 +113,6 @@ def find_entry(description, top_k=3):
     conv = {_base(f) for f, _ in C if _base(f) in anchor_bases}
 
     out = [f"# 找入口：{description}"]
-    if src == "json" and mem.db_enabled():
-        out.append("\n> ⚠️ 共用記憶 DB 連線失敗，本次使用本地 anchors.json 備援")
-    elif src == "db-empty":
-        out.append("\n> ⚠️ 共用 DB 的 ANCHOR 表尚未初始化（空表），使用本地 anchors.json；"
-                   "請執行 memory_tables.sql 的種子資料段落")
-
-    # ⓪ 情節記憶：之前查過類似問題，直接給確認過的入口
-    eps = []
-    if mem.db_enabled():
-        try:
-            eps = similar_episodes(description)
-        except Exception:
-            eps = []
-    if eps:
-        out.append("\n## ⚡ 記憶命中：之前查過類似問題")
-        for sc, (eid, q, ep, em, sha, hits, last, ver) in eps:
-            m = f" :: `{em}`" if em else ""
-            badge = " ✅已人工驗證" if ver else ""
-            out.append(f"- (相似 {sc:.2f})「{q}」→ `{ep}`{m}（確認 {hits} 次，最近 {last}）{badge}")
-
-    # 相關的系統性知識片段（不一定對應程式入口）
-    kns = []
-    if mem.db_enabled():
-        try:
-            kns = similar_knowledge(description)
-        except Exception:
-            kns = []
-    if kns:
-        out.append("\n## 📌 相關系統知識")
-        for sc, (kid, topic, fact, rp, hits, last, ver) in kns:
-            ref = f"（相關程式：`{rp}`）" if rp else ""
-            badge = " ✅已人工驗證" if ver else ""
-            out.append(f"- 【{topic}】{fact}{ref}{badge}")
-
     if A:
         out.append("\n## ① 領域錨點")
         for i, (n, d, ep, em, kt, sk) in enumerate(A[:top_k]):
@@ -264,27 +130,9 @@ def find_entry(description, top_k=3):
         for f, sc in C[:4]:
             tag = " ←與①同" if _base(f) in anchor_bases else ""
             out.append(f"- {sc:.2f} `{_base(f)}`{tag}")
+
     out.append("\n## ▶ 結論")
-    if eps and eps[0][0] >= 0.5:
-        sc, (eid, q, ep, em, sha, hits, last, ver) = eps[0]
-        m = f"，從函式 `{em}` 開始" if em else ""
-        v = "、已人工驗證" if ver else ""
-        out.append(f"之前確認過幾乎相同的問題 → 直接進 `{ep}`{m}（記憶相似 {sc:.2f}、確認 {hits} 次{v}）。")
-    elif eps:
-        # 情節記憶有中但相似度中等：仍優先於「信心 1」的弱錨點，避免單一高頻觸發詞劫持結論
-        sc, (eid, q, ep, em, sha, hits, last, ver) = eps[0]
-        if not A or A[0][0] <= 1:
-            m = f"，函式 `{em}`" if em else ""
-            out.append(f"記憶中有相似問題（相似 {sc:.2f}）→ 優先確認 `{ep}`{m}；"
-                       f"下方錨點信心低（≤1 個觸發詞），僅供備選。")
-        else:
-            top = A[0]
-            out.append(f"這是【{top[1]}】問題 → 進 `{top[2]}`（另有相似記憶見上⚡，可交叉確認）")
-    elif kns and kns[0][0] >= 0.45 and (not A or A[0][0] <= 1):
-        # 系統知識高相關、錨點只中 1 個觸發詞 → 知識優先，錨點降為備選
-        out.append("已有高相關系統知識（見上 📌）——優先依知識內容回答或續查；"
-                   "下方錨點僅命中 1 個觸發詞，信心不足，勿直接當結論。")
-    elif A:
+    if A:
         top = A[0]
         c = "（歷史前例佐證，信心高）" if _base(top[2]) in conv else ""
         w = "（僅命中 1 個觸發詞，信心低，建議先驗證）" if top[0] <= 1 else ""
@@ -294,18 +142,8 @@ def find_entry(description, top_k=3):
     elif C:
         out.append(f"錨點未命中；最可能檔案 `{_base(C[0][0])}`（僅歷史前例，信心較低，建議人工確認）")
     else:
-        out.append("無明確命中。建議改用關鍵字搜尋，或為此領域補一筆 ANCHOR。")
-
-    # 未命中（無記憶、無錨點）→ 建立 pending，讓事後沉澱只需帶 id
-    if not eps and not A:
-        pid = _add_pending(description)
-        out.append(f"\n⏳ 已建立待沉澱記錄 **pending_id={pid}**（本次問句已暫存）。"
-                   f"你自行找到入口後，呼叫 `remember(pending_id={pid}, entry_path=確認的路徑)` "
-                   f"即可一行完成沉澱，不必重打問句。")
-    if mem.db_enabled():
-        out.append("\n▶ 追完程式鏈、確認實際入口後，請呼叫 `remember` 沉澱記憶（下次直接命中）；"
-                   "若過程中確認了系統性知識（排程方式、執行時機、手動/自動等），用 `remember_fact` 記錄。")
-    out.append(f"\n_index @ {_index_sha()}_")
+        out.append("錨點未命中。建議改用關鍵字搜尋原始碼。")
+    out.append(f"\n_index @ {index_sha()}_")
     return "\n".join(out)
 
 
@@ -347,9 +185,6 @@ def trace(entry, cls_hint=None, depth=2):
             "SELECT DISTINCT SRC_METHOD FROM HRMS_CODE_EDGE WHERE DST_PATH=? AND SRC_PATH=? AND EDGE_KIND='calls_method'",
             (entry, cls_path))]
         out.append(f"\n▲ 被呼叫(入口)：{', '.join(callers[:12]) or '(無 / 由排程或跨類別呼叫)'}")
-        if mem.db_enabled():
-            out.append("\n▶ 若這條鏈已確認就是答案 → **現在**呼叫 `remember`（問題→入口）沉澱；"
-                       "追鏈過程確認的系統運作事實（排程/觸發時機/資料流）用 `remember_fact`。")
         out.append(f"\n_index @ {_sha(cur)}_")
         return "\n".join(out)
     finally:
@@ -370,92 +205,9 @@ def verify_call_path(src_method, dst):
             if r[2]:
                 lines.append(f"佐證：`{r[2][:150]}`" + (f"（L{r[3]}）" if r[3] else ""))
             lines.append(f"位置：`{r[0]}`")
-            if mem.db_enabled():
-                lines.append("▶ 驗證通過＝呼叫鏈確認。若這就是本次問題的答案，"
-                             "**現在**呼叫 `remember` 沉澱（問題→入口）。")
             return "\n".join(lines)
         return (f"❓ **not_found**：索引查無 `{src_method}` → `{dst}` 的直接呼叫。\n"
                 "⚠️ 這**不代表不存在**——可能是動態呼叫(變數組 SP 名)、跨類別呼叫，或索引未涵蓋。"
                 "請人工於原始碼確認，切勿當作『一定沒有』。")
     finally:
         con.close()
-
-
-# ── 回饋迴路：把查對的「敘述領域→入口」沉澱成 ANCHOR ──────────
-def learn(domain, triggers, entry_path, entry_methods="", key_tables="", note=""):
-    """新增/更新一個領域錨點（同名覆蓋）。優先寫共用 MSSQL 表，失敗退 anchors.json。"""
-    db_err = ""
-    if mem.db_enabled():
-        try:
-            total = mem.save_anchor(domain, triggers, entry_path, entry_methods, key_tables, note)
-            return (f"✅ 已學習領域【{domain}】→ `{entry_path}`（寫入共用記憶 DB，全團隊生效）\n"
-                    f"觸發詞：{triggers}\n"
-                    f"目前共 {total} 個領域。")
-        except Exception as e:
-            db_err = f"\n⚠️ 共用記憶 DB 寫入失敗（{e}），已退回本地 anchors.json。"
-    data = {"anchors": [], "synonyms": []}
-    if os.path.exists(ANCHORS_JSON):
-        data = json.load(open(ANCHORS_JSON, encoding="utf-8"))
-    data.setdefault("anchors", [])
-    data.setdefault("synonyms", [])
-    # 同名領域則覆蓋
-    data["anchors"] = [a for a in data["anchors"] if a.get("domain") != domain]
-    data["anchors"].append({
-        "domain": domain, "triggers": triggers, "entry_path": entry_path,
-        "entry_methods": entry_methods, "key_tables": key_tables, "skill": "", "note": note,
-    })
-    with open(ANCHORS_JSON, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    return (f"✅ 已學習領域【{domain}】→ `{entry_path}`\n"
-            f"觸發詞：{triggers}\n"
-            f"目前共 {len(data['anchors'])} 個領域。\n"
-            f"⚠️ 寫入的是執行中副本的 anchors.json；要**永久保留**請把它 commit 進 plugin 原始碼。"
-            + db_err)
-
-
-# ── 情節記憶：記住「這次的問題 → 確認的入口」──────────────────
-def remember(question, entry_path, entry_method="", pending_id=None):
-    """把一次查對的問題與確認入口寫進共用 EPISODE 表，下次 find_entry 直接命中。
-    pending_id：find_entry 未命中時建立的待沉澱記錄，帶入可省略 question。"""
-    if pending_id:
-        pending_q = _PENDING.get(int(pending_id))
-        if pending_q:
-            if not question:
-                question = pending_q
-            _PENDING.pop(int(pending_id), None)
-        elif not question:
-            return (f"⚠️ 找不到 pending_id={pending_id}（可能 MCP server 已重啟）。"
-                    f"請改帶 question 參數重新呼叫。")
-    if not question:
-        return "⚠️ 需提供 question 或有效的 pending_id。"
-    if not mem.db_enabled():
-        return ("⚠️ 未設定 MSSQL_* 環境變數，情節記憶功能停用。\n"
-                "領域級的知識仍可用 `learn` 寫入本地 anchors.json。")
-    sha = _index_sha()
-    try:
-        eid, created = mem.add_episode(question, entry_path, entry_method, sha)
-        if created:
-            m = f" :: `{entry_method}`" if entry_method else ""
-            return (f"✅ 已記住（記憶 ID {eid}）：「{question}」→ `{entry_path}`{m}\n"
-                    f"之後全團隊查類似問題時，find_entry 會直接提示這個入口。")
-        return f"✅ 相同記憶已存在（ID {eid}），確認次數 +1（信心累積）。"
-    except Exception as e:
-        return (f"⚠️ 記憶寫入失敗：{e}\n"
-                f"請確認 HRMS_MEMORY 資料表已建立，且帳號有 INSERT 權限。")
-
-
-# ── 語意知識：記住系統性知識片段（不一定對應程式入口）──────────
-def remember_fact(topic, fact, related_path=""):
-    """把確認過的系統性知識寫進共用 KNOWLEDGE 表，之後 find_entry 會一併帶出。"""
-    if not mem.db_enabled():
-        return "⚠️ 未設定 MSSQL_* 環境變數，系統知識記憶功能停用。"
-    try:
-        kid, created = mem.add_knowledge(topic, fact, related_path)
-        if created:
-            ref = f"（相關程式：`{related_path}`）" if related_path else ""
-            return (f"✅ 已記住系統知識（記憶 ID {kid}）【{topic}】{ref}\n{fact}\n"
-                    f"之後全團隊問到相關主題時，find_entry 會一併帶出這則知識。")
-        return f"✅ 相同知識已存在（ID {kid}），確認次數 +1（信心累積）。"
-    except Exception as e:
-        return (f"⚠️ 知識寫入失敗：{e}\n"
-                f"請確認 HRMS_MEMORY 資料表已建立，且帳號有 INSERT 權限。")

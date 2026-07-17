@@ -27,11 +27,21 @@
     "env": {
       "MCP_MODE": "stdio",
       "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH",
-      "CODEGRAPH_DB": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/codegraph.sqlite",
+      "CODEGRAPH_DB": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/codegraph.sqlite"
+    }
+  },
+  "ehrms-memory": {
+    "command": "py",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/servers/MEMORY/server.py"],
+    "env": {
+      "MCP_MODE": "stdio",
+      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/MEMORY",
       "MSSQL_SERVER": "${MSSQL_SERVER}",
       "MSSQL_DATABASE": "${MSSQL_DATABASE}",
       "MSSQL_USERNAME": "${MSSQL_USERNAME}",
-      "MSSQL_PASSWORD": "${MSSQL_PASSWORD}"
+      "MSSQL_PASSWORD": "${MSSQL_PASSWORD}",
+      "JIRA_EMAIL": "${JIRA_EMAIL}",
+      "CODEGRAPH_DB": "${CLAUDE_PLUGIN_ROOT}/servers/CODEGRAPH/codegraph.sqlite"
     }
   }
 }

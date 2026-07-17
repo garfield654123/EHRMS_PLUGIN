@@ -1,19 +1,29 @@
 # ehrms-tools Plugin 使用說明
 
-EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP** 查詢工具及 **MCP 設定管理 Skill**，讓你在 Claude Code 中直接查詢 JIRA Issue 和 EHRMS 資料庫。
+EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**codegraph 程式圖譜**、**ehrms-memory 團隊共用記憶** 及 **MCP 設定管理 Skill**。
 
 ---
 
-## v1.2.0 記憶迴路強化（codegraph）
+## v2.0.0 架構重構：圖譜與記憶徹底分離
 
-解決「查了程式入口卻沒沉澱記憶」的四層防線：
+v1.x 的 codegraph 把「程式圖譜」和「記憶」混在同一組工具裡（find_entry 一半查程式、一半吐記憶），v2.0.0 打掉重練，拆成兩個職責單一的 MCP：
 
-1. **確定性 Stop hook**（`hooks/check_memory.py`）：解析 transcript 的 tool_use 名稱——本回合用過 `find_entry`/`trace` 但沒呼叫任何記憶工具時，回合結束前攔截一次提醒（原 prompt 型 hook 改為 command 型，不再依賴模型自覺；每回合最多提醒一次）
-2. **pending 機制**：`find_entry` 完全未命中時自動暫存問句並回傳 `pending_id`，事後 `remember(pending_id=N, entry_path=...)` 一行完成沉澱，免重打問句（存活範圍＝MCP process，不進共用 DB）
-3. **末端提醒**：`trace` 與 `verify_call_path`（verified 時）的回傳尾端帶「現在就 remember」提示——提醒出現在呼叫鏈末端而非起點
-4. **檢索修正**：bigram 集加入英數 token（excel、SP 名等高鑑別度詞）；新增「最長共同片語 ≥4 字」加權（防長問句稀釋分數）；結論排序改為 記憶/知識 優先於「僅命中 1 個觸發詞」的弱錨點（防單一高頻詞如「刷卡」劫持結論）
+| MCP | 職責 | 資料來源 |
+|-----|------|----------|
+| `ehrms-codegraph` | 程式地圖：找入口、追呼叫鏈、驗證呼叫（**無記憶邏輯、無 DB 依賴**） | `codegraph.sqlite`＋`anchors.json`（git 版控） |
+| `ehrms-memory` | 團隊共用記憶：檢索（recall）、沉澱（remember） | MSSQL `HRMS_MEMORY` 表 |
 
-搭配專案 CLAUDE.md 的「步驟 4.5：沉澱 codegraph 記憶」（輸出診斷報告**前**執行），構成完整迴路。
+記憶設計要點：
+
+1. **兩型記憶**：`System`＝系統使用層知識（客服視角：操作順序、前置條件、功能行為）；`Engineer`＝程式入口與邏輯要點（維運視角，entry_path 必填）
+2. **寫入端把關**：`remember` 內建確定性去重——高相似同結論 → 不新增、舊筆信心 +1；高相似不同結論 → 要求明確帶 `supersedes`（訂正）或 `force`（新議題）
+3. **訂正一級公民**：`remember(supersedes=舊ID)` 插入新版取代舊版，讀取端自動排除被取代者（append-only，永不 UPDATE/DELETE 內容）
+4. **使用即強化**：`recall` 命中自動累計 `HIT_COUNT`/`LAST_HIT_AT`，常用記憶浮上來、零引用記憶成為去蕪存菁候選
+5. **記錄者＝Jira 帳號**：`CREATED_BY` 取自 `JIRA_EMAIL`（如 ziping.zhou），與 Jira 溯源一致
+6. **定期去蕪存菁**：`/memory-curate` skill 合併重複、訂正矛盾、淘汰過時（全程 supersede 表達，物理刪除只有 DBA 能做）
+7. **沉澱時機由 skill 流程編排**（查案 skill 的固定步驟：開頭 recall、結論後 remember），不再使用 Stop hook 強迫寫入
+
+建表 SQL：`servers/MEMORY/hrms_memory.sql`（含最小權限 GRANT/DENY，請 DBA 執行）。
 
 ---
 
@@ -286,6 +296,36 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 
 ---
 
+### codegraph MCP 工具（純程式圖譜）
+
+透過 `ehrms-codegraph` 提供（無 DB 依賴，只讀 `codegraph.sqlite` 與 `anchors.json`）：
+
+| 工具 | 說明 |
+|------|------|
+| `find_entry` | 敘述 → 領域錨點路由 → 程式入口候選（不含記憶） |
+| `trace` | 從函式沿呼叫鏈追蹤（函式→函式、函式→SP） |
+| `verify_call_path` | 驗證某條呼叫是否存在（反幻覺閘門，永不回「一定沒有」） |
+
+---
+
+### memory MCP 工具（團隊共用記憶）
+
+透過 `ehrms-memory` 提供（需 MSSQL_* 環境變數；`JIRA_EMAIL` 決定記錄者身分）：
+
+| 工具 | 說明 |
+|------|------|
+| `recall` | 檢索記憶，System/Engineer 分組回傳；命中自動累計引用次數。查案流程第一步呼叫 |
+| `remember` | 寫入記憶（唯一寫入口，內建去重）；`supersedes=舊ID` 完成訂正。結論確認後呼叫 |
+
+使用範例：
+
+- 查案開頭：「recall：災防假加班時數計算錯誤」→ 帶出過往確認的入口與系統知識
+- 結論沉澱：`remember(kind="Engineer", topic="災防假加班時數計算", content="...", entry_path="...", ref_key="EHRMSONE-32543")`
+- 訂正錯誤：`remember(..., supersedes="21")` → 新版取代舊版，檢索不再回傳舊結論
+- 定期維護：執行 `/memory-curate` 去蕪存菁
+
+---
+
 ### /mcp-config Skill
 
 用於管理 Claude Code 的 MCP 伺服器設定。
@@ -307,7 +347,7 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 plugins/ehrms-tools/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin 基本資訊
-├── .mcp.json                # MCP 伺服器設定
+├── .mcp.json                # MCP 伺服器設定（4 個 MCP）
 ├── servers/
 │   ├── JIRA_MCP/            # JIRA MCP 伺服器原始碼
 │   │   └── jira_mcp/
@@ -315,14 +355,25 @@ plugins/ehrms-tools/
 │   │       ├── server.py    # MCP 工具定義與路由
 │   │       ├── client.py    # Jira REST API 客戶端
 │   │       └── config.py    # 設定讀取（環境變數）
-│   └── MCP_1.0/             # DB MCP 伺服器原始碼
-│       ├── server.py        # MCP 工具定義與路由
-│       ├── config.py        # 設定讀取（環境變數）
-│       ├── tools/           # 各工具實作模組
-│       └── utils/           # 共用工具（DB 連線池、格式化、Session 管理）
+│   ├── MCP_1.0/             # DB MCP 伺服器原始碼
+│   │   ├── server.py        # MCP 工具定義與路由
+│   │   ├── config.py        # 設定讀取（環境變數）
+│   │   ├── tools/           # 各工具實作模組
+│   │   └── utils/           # 共用工具（DB 連線池、格式化、Session 管理）
+│   ├── CODEGRAPH/           # 程式圖譜 MCP（純圖譜，無記憶）
+│   │   ├── server.py        # find_entry / trace / verify_call_path
+│   │   ├── codegraph_core.py
+│   │   ├── anchors.json     # 領域錨點（git 版控的路由層）
+│   │   └── codegraph.sqlite # 呼叫圖索引（METHOD/EDGE）
+│   └── MEMORY/              # 團隊共用記憶 MCP
+│       ├── server.py        # recall / remember
+│       ├── memory_core.py   # 檢索評分、去重管線、supersede 訂正
+│       ├── memory_db.py     # HRMS_MEMORY 資料層（append-only）
+│       └── hrms_memory.sql # 建表＋View＋最小權限（DBA 執行）
 ├── skills/
-│   └── mcp-config/
-│       └── SKILL.md         # /mcp-config Skill 定義
+│   ├── mcp-config/          # /mcp-config：MCP 設定管理
+│   ├── setup-guide/         # /setup-guide：安裝設定指引
+│   └── memory-curate/       # /memory-curate：記憶去蕪存菁
 ├── requirements.txt         # Python 套件依賴清單
 └── setup.bat                # Windows 安裝腳本
 ```

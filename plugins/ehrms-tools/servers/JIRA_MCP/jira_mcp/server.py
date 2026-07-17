@@ -45,6 +45,20 @@ async def list_tools() -> list[Tool]:
     """列出所有可用的工具"""
     return [
         Tool(
+            name="get_issue",
+            description="取得 Issue 的基本欄位與評論（輕量查詢）。一次回傳 key、summary、status、assignee、priority、issue_type、created、updated 與所有評論（純文字），不抓取全部欄位以節省資源。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "issue_key": {
+                        "type": "string",
+                        "description": "Issue 的 Key，例如: PROJ-123"
+                    }
+                },
+                "required": ["issue_key"]
+            }
+        ),
+        Tool(
             name="get_issue_summary",
             description="取得 Issue 的基本摘要資訊（輕量查詢），僅回傳 key、summary、status、assignee、priority、issue_type、created、updated。",
             inputSchema={
@@ -60,7 +74,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="search_issues",
-            description="使用 JQL 搜尋 Jira Issues。支援完整的 JQL 語法，可查詢所有欄位包含自訂欄位。",
+            description="使用 JQL 搜尋 Jira Issues。永遠回傳精簡結構（key、summary、status、assignee、reporter、priority、issue_type、created、updated、duedate、labels、components、description[截斷]、attachments、parent），描述已轉純文字並截斷——需要單筆全文請改用 get_issue。fields 可追加額外欄位（如 customfield_12722），追加欄位也會轉純文字並截斷，不會回傳原始 JSON。單頁上限 50 筆；回傳含 next_page_token 時帶回原參數可取下一頁。",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -70,8 +84,17 @@ async def list_tools() -> list[Tool]:
                     },
                     "max_results": {
                         "type": "number",
-                        "description": "最大結果數量（預設: 50）",
+                        "description": "單頁筆數（預設 50，上限 50）",
                         "default": 50
+                    },
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要「追加」的欄位清單，例如: [\"customfield_12722\"]。基本精簡欄位一律回傳；*all 無效"
+                    },
+                    "next_page_token": {
+                        "type": "string",
+                        "description": "上一頁回傳的翻頁 token（取下一頁時帶入）"
                     }
                 },
                 "required": ["jql"]
@@ -156,7 +179,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_issue_changelog",
-            description="取得 Issue 的變更歷史 (符合 Jira REST API v3 標準)",
+            description="取得 Issue 的完整變更歷史（自動翻頁），精簡輸出為 (時間, 操作者, 欄位 from→to) 列表。",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -170,13 +193,13 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_user_info",
-            description="取得用戶資訊 (符合 Jira REST API v3 標準)",
+            description="取得用戶資訊。不填 username 回傳當前用戶；填入 email 或顯示名稱則模糊搜尋（回傳最多 10 筆 accountId/displayName/email）。",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "username": {
                         "type": "string",
-                        "description": "用戶名（選填，不填則取得當前用戶）"
+                        "description": "email 或顯示名稱關鍵字（選填，不填則取得當前用戶）"
                     }
                 },
                 "required": []
@@ -218,7 +241,15 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
     try:
         client = _get_client()
 
-        if name == "get_issue_summary":
+        if name == "get_issue":
+            issue_key = arguments["issue_key"]
+            result = await client.get_issue_basic(issue_key)
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, ensure_ascii=False, indent=2)
+            )]
+
+        elif name == "get_issue_summary":
             issue_key = arguments["issue_key"]
             result = await client.get_issue_summary(issue_key)
             return [TextContent(
@@ -229,7 +260,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         elif name == "search_issues":
             jql = arguments["jql"]
             max_results = arguments.get("max_results", 50)
-            result = await client.search_issues(jql=jql, max_results=max_results)
+            fields = arguments.get("fields")
+            next_page_token = arguments.get("next_page_token")
+            result = await client.search_issues(
+                jql=jql, fields=fields, max_results=max_results,
+                next_page_token=next_page_token)
             return [TextContent(
                 type="text",
                 text=json.dumps(result, indent=2, ensure_ascii=False)
