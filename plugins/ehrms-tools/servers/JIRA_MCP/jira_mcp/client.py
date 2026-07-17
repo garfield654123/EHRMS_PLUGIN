@@ -77,6 +77,15 @@ class JiraClient:
     ]
     # detail="list"（預設）的最小清單欄位：掃清單找目標用，細節靠 get_issue 查單筆
     LIST_FIELDS = ["summary", "status", "assignee", "updated"]
+    # get_issue 預設加抓的 EHRMSONE 高頻自訂欄位（option 物件只取文字，回傳用友善鍵名）
+    ISSUE_CUSTOM_FIELDS = {
+        "customfield_12722": "customer",      # 客戶名稱（統編＋公司名）
+        "customfield_11949": "severity",      # 嚴重度（Fatal…）
+        "customfield_12362": "source",        # 問題來源（客戶…）
+        "customfield_11820": "category",      # 單據類別（維運…）
+        "customfield_11901": "issue_nature",  # 問題類型（一般問題…）
+        "customfield_12364": "problem_type",  # 問題性質（線上問題…）
+    }
     MAX_SEARCH_RESULTS = 50   # 單次搜尋上限（防上下文爆量）
     MAX_DESC_CHARS = 600      # 清單場景的描述截斷長度；全文請查單筆
     MAX_EXTRA_CHARS = 800     # 額外指定欄位的截斷長度
@@ -403,24 +412,38 @@ class JiraClient:
         return out
 
     async def get_issue_basic(self, issue_key: str,
-                              comments_limit: int = 10) -> dict[str, Any]:
+                              comments_limit: int = 10,
+                              fields: Optional[list[str]] = None) -> dict[str, Any]:
         """
         取得單張 Issue 的完整內容（單筆全文視角）
 
         回傳精簡欄位結構＋完整描述（ADF→純文字，保險上限 MAX_FULL_DESC_CHARS）
+        ＋EHRMSONE 高頻自訂欄位（客戶/嚴重度等，友善鍵名）
         ＋最新 comments_limit 筆評論（新→舊）。
         search_issues 截斷描述後指引到本方法，這裡必須給得出全文。
 
         Args:
             issue_key: Issue 的 Key (例如: PROJ-123)
             comments_limit: 評論筆數（預設 10；0=不帶評論）
+            fields: 額外追加的欄位（如其他 customfield_*），轉純文字並截斷
 
         Returns:
-            dict: 精簡欄位 + description 全文 + comment_total + comments[]（新→舊）
+            dict: 精簡欄位 + description 全文 + 自訂欄位 + comment_total + comments[]（新→舊）
         """
-        issue = await self.get_issue(
-            issue_key, fields=list(self.DEFAULT_SEARCH_FIELDS), plain_text=False)
-        data = self._simplify_issue(issue, desc_limit=self.MAX_FULL_DESC_CHARS)
+        extra = [x for x in (fields or []) if x and not x.startswith("*")]
+        fetch = (list(self.DEFAULT_SEARCH_FIELDS)
+                 + list(self.ISSUE_CUSTOM_FIELDS) + extra)
+        issue = await self.get_issue(issue_key, fields=fetch, plain_text=False)
+        data = self._simplify_issue(issue, extra_fields=extra,
+                                    desc_limit=self.MAX_FULL_DESC_CHARS)
+
+        f = issue.get("fields", {})
+        for cid, alias in self.ISSUE_CUSTOM_FIELDS.items():
+            val = self._field_to_text(f.get(cid))
+            if isinstance(val, list):
+                val = "、".join(str(x) for x in val if x)
+            if val:
+                data[alias] = val
 
         if comments_limit and int(comments_limit) > 0:
             result = await self.get_issue_comments(issue_key, limit=comments_limit)

@@ -76,7 +76,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="get_issue",
-            description="取得單張 Issue 的完整內容：精簡欄位＋**完整描述**（ADF 轉純文字）＋**最新 N 筆評論**（新→舊，預設 10）。查單筆全文用這個；要更早的評論調大 comments_limit 或用 get_comments。",
+            description="取得單張 Issue 的完整內容：精簡欄位＋**完整描述**（ADF 轉純文字）＋EHRMSONE 常用自訂欄位（customer 客戶名稱、severity 嚴重度、source 問題來源、category 單據類別、issue_nature 問題類型、problem_type 問題性質）＋**最新 N 筆評論**（新→舊，預設 10）。查單筆全文用這個；要更早的評論調大 comments_limit 或用 get_comments。",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -88,6 +88,11 @@ async def list_tools() -> list[Tool]:
                         "type": "number",
                         "description": "評論筆數（預設 10，最新優先；0=不帶評論）",
                         "default": 10
+                    },
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "額外追加的欄位清單（如其他 customfield_*），轉純文字並截斷；*all 無效"
                     }
                 },
                 "required": ["issue_key"]
@@ -270,7 +275,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         if name == "get_issue":
             issue_key = arguments["issue_key"]
             comments_limit = int(arguments.get("comments_limit", 10))
-            result = await client.get_issue_basic(issue_key, comments_limit=comments_limit)
+            result = await client.get_issue_basic(
+                issue_key, comments_limit=comments_limit,
+                fields=arguments.get("fields"))
             return [TextContent(
                 type="text",
                 text=json.dumps(result, ensure_ascii=False, indent=2)

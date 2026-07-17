@@ -276,7 +276,7 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 
 | 工具 | 說明 | 使用情境 |
 |------|------|----------|
-| `get_issue` | 單張 Issue 完整內容：全文描述＋最新 N 筆評論（預設 10，新→舊） | 深入看一張單 |
+| `get_issue` | 單張 Issue 完整內容：全文描述＋常用自訂欄位（客戶/嚴重度/來源/類別）＋最新 N 筆評論（預設 10，新→舊） | 深入看一張單 |
 | `get_issue_summary` | 取得 Issue 基本摘要（輕量） | 快速查看標題與狀態 |
 | `search_issues` | JQL 搜尋；預設精簡清單（key/summary/status/assignee/updated），`detail="full"` 回完整欄位 | 掃清單找目標 |
 | `get_comments` | 最新 N 筆評論（預設 20，新→舊，`limit` 可調） | 追蹤討論進度 |
