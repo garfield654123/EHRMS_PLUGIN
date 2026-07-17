@@ -5,15 +5,17 @@ HRMS_JIRA.CHANGED_FILES 與 HRMS_MEMORY.ENTRY_PATH 是跨機器共用的知識�
 本機絕對路徑（C:/D/EHRMS_GIT/...）換台電腦就對不上；本模組在唯一寫入口
 （jira_log / remember）做確定性轉換：
 - 反斜線一律轉正斜線
-- 絕對路徑以錨點資料夾（REPO_ROOT_MARKERS，預設 EHRMS_GIT）剝除前綴
+- 絕對路徑以錨點資料夾（REPO_ROOT_MARKERS，預設 EHRMS_GIT,CUSTOM_GIT）剝除本機前綴：
+  第一個錨點視為主 repo（剝掉錨點本身，如 VB/EHRMS/xx.cls）；
+  其餘錨點保留名稱前綴以區分 repo（如 CUSTOM_GIT/23019591_Skhb/...）
 - 剝不掉的絕對路徑回錯誤，由呼叫端拒絕寫入
 """
 import os
 import re
 
-# 錨點資料夾名（逗號分隔可多個）：路徑中出現「/<錨點>/」時取其後為 repo 相對路徑
+# 錨點資料夾名（逗號分隔可多個，第一個為主 repo）
 _MARKERS = [m.strip() for m in
-            os.getenv("REPO_ROOT_MARKERS", "EHRMS_GIT").split(",") if m.strip()]
+            os.getenv("REPO_ROOT_MARKERS", "EHRMS_GIT,CUSTOM_GIT").split(",") if m.strip()]
 
 _ABS_RE = re.compile(r"^([A-Za-z]:/|//|/)")  # 磁碟機、UNC、POSIX 絕對路徑
 
@@ -26,10 +28,12 @@ def normalize(path):
     if not _ABS_RE.match(p):
         return p.lstrip("./"), None
     low = p.lower()
-    for marker in _MARKERS:
+    for idx, marker in enumerate(_MARKERS):
         i = low.find("/" + marker.lower() + "/")
         if i >= 0:
-            return p[i + len(marker) + 2:], None
+            rel = p[i + len(marker) + 2:]
+            # 主 repo 剝掉錨點；其他 repo 保留名稱前綴以區分
+            return (rel if idx == 0 else f"{marker}/{rel}"), None
     return None, f"「{path}」是絕對路徑且找不到錨點（{'、'.join(_MARKERS)}）"
 
 
