@@ -8,7 +8,7 @@ description: EHRMS Bug Fix 測試步驟撰寫規範，包含測試資料查找�
 ## 快速流程
 
 ```
-問題理解 → 查找測試資料（MCP） → 撰寫步驟 → 預期結果 → 影響範圍
+問題理解 → 查找測試資料（MCP） → 撰寫步驟 → 預期結果 → 影響範圍 → jira_log 結案紀錄
 ```
 
 ---
@@ -176,7 +176,17 @@ Step 4：觀察 [驗證點]
 
 ---
 
-## F. 常見 Bug 類型與對應測試重點
+## F. 結案紀錄沉澱（HRMS_JIRA）
+
+測試報告輸出**前**，把本次 bug fix 寫入結案紀錄（此時程式修改已定案，是記錄 changed_files 的最佳時點）：
+
+1. `jira_lookup(單號)` 查重
+2. 無紀錄 → `jira_log(kind="Story", jira_key=單號, title=一句話摘要, root_cause=發生根因, resolution=解決方式, changed_files=修改的程式（一行一筆「路徑 :: 函式」，Story 必填）, keywords=3~8 個)`
+3. 已有紀錄且結論已改變 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫
+
+---
+
+## G. 常見 Bug 類型與對應測試重點
 
 | Bug 類型 | 測試重點 | MCP 查找方向 |
 |---------|---------|------------|

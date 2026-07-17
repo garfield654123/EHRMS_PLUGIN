@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""EHRMS memory MCP server（stdio）——團隊共用記憶（HRMS_MEMORY）
-① recall：檢索記憶（命中即強化）   ② remember：寫入記憶（去重＋supersede 訂正）
+"""EHRMS memory MCP server（stdio）——團隊共用記憶＋Jira 結案紀錄
+① recall / remember：跨單可泛化知識（HRMS_MEMORY）
+② jira_lookup / jira_log：單一案件結案紀錄（HRMS_JIRA，一單一筆有效紀錄）
 """
 import asyncio
 from mcp.server import Server
@@ -9,6 +10,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool
 
 import memory_core as mc
+import jira_core as jc
 
 server = Server("ehrms-memory")
 
@@ -68,6 +70,55 @@ async def list_tools() -> list[Tool]:
                 "required": ["kind", "topic", "content"],
             },
         ),
+        Tool(
+            name="jira_lookup",
+            description=(
+                "查 HRMS_JIRA 結案紀錄（每張 Jira 單的根因/解法/修改程式）。"
+                "query 給單號（EHRMSONE-XXXXX 或純數字）→ 精確查該單；"
+                "給問題敘述 → 相似案件檢索（回 top 5）。"
+                "查案開頭與 recall 並行呼叫；jira_log 寫入前也先用它查重。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string",
+                              "description": "Jira 單號或問題敘述（中文）"},
+                    "kind": {"type": "string", "enum": ["Crisis", "Story"],
+                             "description": "敘述檢索時只查某一型（可選）"},
+                    "top_k": {"type": "integer", "description": "敘述檢索回傳筆數，預設 5"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="jira_log",
+            description=(
+                "寫入 Jira 單結案紀錄到 HRMS_JIRA（一單一筆有效紀錄，唯一寫入口）。"
+                "在 skill 流程的報告輸出前呼叫：摘要根因、解決方式、修改程式後寫入。\n"
+                "kind 二選一：Crisis=維運單 / Story=改程式與 bug fix（changed_files 必填）。\n"
+                "同單已有紀錄會擋下並回傳既有內容；本次是修正結論時帶 supersedes=舊ID"
+                "（新筆取代舊筆）。跨單可泛化的知識請另用 remember，兩者互補。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "jira_key": {"type": "string",
+                                 "description": "Jira 單號（EHRMSONE-32543 或純數字）"},
+                    "kind": {"type": "string", "enum": ["Crisis", "Story"],
+                             "description": "Crisis=維運單 / Story=改程式與 bug fix"},
+                    "title": {"type": "string", "description": "一句話案件摘要（檢索錨）"},
+                    "root_cause": {"type": "string", "description": "發生根因"},
+                    "resolution": {"type": "string", "description": "解決方式"},
+                    "changed_files": {"type": "string",
+                                      "description": "修改程式：一行一筆「路徑 :: 函式」（Story 必填）"},
+                    "keywords": {"type": "string",
+                                 "description": "關鍵字，逗號分隔 3~8 個（強烈建議填）"},
+                    "supersedes": {"type": "string",
+                                   "description": "要取代的舊紀錄 ID（修正結論用；僅限同單號）"},
+                },
+                "required": ["jira_key", "kind", "title", "root_cause", "resolution"],
+            },
+        ),
     ]
 
 
@@ -87,6 +138,16 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
             source=arguments.get("source", ""),
             supersedes=arguments.get("supersedes", ""),
             force=bool(arguments.get("force", False))))
+    if name == "jira_lookup":
+        return _text(jc.lookup(
+            arguments["query"], arguments.get("kind"), arguments.get("top_k", 5)))
+    if name == "jira_log":
+        return _text(jc.log_case(
+            arguments["jira_key"], arguments["kind"], arguments["title"],
+            arguments["root_cause"], arguments["resolution"],
+            changed_files=arguments.get("changed_files", ""),
+            keywords=arguments.get("keywords", ""),
+            supersedes=arguments.get("supersedes", "")))
     raise ValueError(f"Unknown tool: {name}")
 
 

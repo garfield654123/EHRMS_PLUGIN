@@ -296,21 +296,28 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 
 ---
 
-### memory MCP 工具（團隊共用記憶）
+### memory MCP 工具（團隊共用記憶＋Jira 結案紀錄）
 
-透過 `ehrms-memory` 提供（需 MSSQL_* 環境變數；`JIRA_EMAIL` 決定記錄者身分）：
+透過 `ehrms-memory` 提供（需 MSSQL_* 環境變數；`JIRA_EMAIL` 決定記錄者身分）。
+兩組工具互補：`recall`/`remember` 管**跨單可泛化知識**（HRMS_MEMORY），
+`jira_lookup`/`jira_log` 管**單一案件結案紀錄**（HRMS_JIRA，一單一筆有效紀錄）。
 
 | 工具 | 說明 |
 |------|------|
 | `recall` | 檢索記憶，System/Engineer 分組回傳；命中自動累計引用次數。查案流程第一步呼叫 |
 | `remember` | 寫入記憶（唯一寫入口，內建去重）；`supersedes=舊ID` 完成訂正。結論確認後呼叫 |
+| `jira_lookup` | 查結案紀錄：給單號 → 精確查該單；給問題敘述 → 相似案件檢索。查案開頭與 recall 並行 |
+| `jira_log` | 寫入結案紀錄（單號/單型/根因/解法/修改程式）；同單重複會擋下，修正結論帶 `supersedes=舊ID`。Crisis=維運單、Story=改程式與 bug fix（changed_files 必填） |
 
 使用範例：
 
-- 查案開頭：「recall：災防假加班時數計算錯誤」→ 帶出過往確認的入口與系統知識
+- 查案開頭：「recall：災防假加班時數計算錯誤」＋「jira_lookup：災防假加班時數計算錯誤」並行
+- 結案沉澱：`jira_log(jira_key="EHRMSONE-32543", kind="Crisis", title="...", root_cause="...", resolution="...")`
 - 結論沉澱：`remember(kind="Engineer", topic="災防假加班時數計算", content="...", entry_path="...", ref_key="EHRMSONE-32543")`
-- 訂正錯誤：`remember(..., supersedes="21")` → 新版取代舊版，檢索不再回傳舊結論
+- 修正結論：`jira_log(..., supersedes="21")` / `remember(..., supersedes="21")` → 新版取代舊版
 - 定期維護：執行 `/memory-curate` 去蕪存菁
+
+建表 SQL：`servers/MEMORY/hrms_jira.sql`（含最小權限 GRANT/DENY，請 DBA 執行）。
 
 ---
 
@@ -348,11 +355,14 @@ plugins/ehrms-tools/
 │   │   ├── config.py        # 設定讀取（環境變數）
 │   │   ├── tools/           # 各工具實作模組
 │   │   └── utils/           # 共用工具（DB 連線池、格式化、Session 管理）
-│   └── MEMORY/              # 團隊共用記憶 MCP
-│       ├── server.py        # recall / remember
-│       ├── memory_core.py   # 檢索評分、去重管線、supersede 訂正
+│   └── MEMORY/              # 團隊共用記憶＋Jira 結案紀錄 MCP
+│       ├── server.py        # recall / remember / jira_lookup / jira_log
+│       ├── memory_core.py   # 記憶檢索評分、去重管線、supersede 訂正
 │       ├── memory_db.py     # HRMS_MEMORY 資料層（append-only）
-│       └── hrms_memory.sql # 建表＋View＋最小權限（DBA 執行）
+│       ├── jira_core.py     # 結案紀錄去重、同單 supersede、相似案件檢索
+│       ├── jira_db.py       # HRMS_JIRA 資料層（append-only）
+│       ├── hrms_memory.sql # HRMS_MEMORY 建表＋View＋最小權限（DBA 執行）
+│       └── hrms_jira.sql   # HRMS_JIRA 建表＋View＋最小權限（DBA 執行）
 ├── skills/
 │   ├── crisis-triage/       # 維運單（Crisis 單）查單與除錯流程
 │   ├── mail-query/          # AutoEngine 通知信程式碼定位
