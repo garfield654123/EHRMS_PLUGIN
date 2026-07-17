@@ -1,6 +1,6 @@
 {
   "name": "ehrms-tools",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "description": "EHRMS 開發工具包：JIRA MCP、DB MCP 與 ehrms-memory（HRMS_MEMORY 團隊共用記憶＋HRMS_JIRA 維運單結案紀錄）及 MCP 設定管理 skill。",
   "author": {
     "name": "ziping.zhou",

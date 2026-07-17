@@ -15,6 +15,7 @@ import re
 from difflib import SequenceMatcher
 
 import memory_db as db
+import pathnorm
 
 KINDS = ("System", "Engineer")
 RECALL_THRESHOLD = 0.30   # 檢索：低於此分不回傳
@@ -199,6 +200,10 @@ def remember(kind, topic, content, keywords="", func_path="", entry_path="",
         return "⚠️ topic 與 content 為必填。"
     if kind == "Engineer" and not entry_path:
         return "⚠️ Engineer 記憶必須提供 entry_path（程式入口）。"
+    if entry_path:
+        entry_path, err = pathnorm.normalize(entry_path)
+        if err:
+            return (f"⚠️ entry_path 需為 **repo 相對路徑**（如 `VB/EHRMS/xx.cls`）：{err}")
     if not db.db_enabled():
         return "⚠️ 未設定 MSSQL_* 環境變數，記憶功能停用。"
 

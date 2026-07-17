@@ -181,7 +181,7 @@ Step 4：觀察 [驗證點]
 測試報告輸出**前**，把本次 bug fix 寫入結案紀錄（此時程式修改已定案，是記錄 changed_files 的最佳時點）：
 
 1. `jira_lookup(單號)` 查重
-2. 無紀錄 → `jira_log(kind="Story", jira_key=單號, title=一句話摘要, root_cause=發生根因, resolution=解決方式, changed_files=修改的程式（一行一筆「路徑 :: 函式」，Story 必填）, keywords=3~8 個)`
+2. 無紀錄 → `jira_log(kind="Story", jira_key=單號, title=一句話摘要, root_cause=發生根因, resolution=解決方式, changed_files=修改的程式（一行一筆「repo 相對路徑 :: 函式」，如 `VB/EHRMS/xx.cls :: CalcOT`，勿用本機絕對路徑；Story 必填）, keywords=3~8 個)`
 3. 已有紀錄且結論已改變 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫
 
 ---

@@ -60,6 +60,6 @@ description: EHRMS Jira 維運單（Crisis 單）查單與除錯流程規範。�
 - 依專案 CLAUDE.md 輸出 5 區塊診斷報告（問題摘要/問題程式碼/修復方案/驗證步驟/風險評估）
 - 需要客戶資料佐證的部分，附上 SQL 與說明請 CS/客戶端執行
 - 報告輸出前沉澱兩件事（互補、各寫各的）：
-  1. **結案紀錄** → 先 `jira_lookup(單號)` 查重：無紀錄 → `jira_log(kind="Crisis", jira_key=單號, title=一句話摘要, root_cause=根因, resolution=解決方式, changed_files=有改程式才填, keywords=3~8 個)`；已有紀錄且本次結論不同 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫
+  1. **結案紀錄** → 先 `jira_lookup(單號)` 查重：無紀錄 → `jira_log(kind="Crisis", jira_key=單號, title=一句話摘要, root_cause=根因, resolution=解決方式, changed_files=有改程式才填（repo 相對路徑，如 `VB/EHRMS/xx.cls :: 函式`，勿用 C:\ 開頭的本機路徑）, keywords=3~8 個)`；已有紀錄且本次結論不同 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫
   2. **可泛化知識** → 跨單通用的系統行為或程式入口才用 `remember`（System/Engineer 兩型；訂正帶 `supersedes=舊ID`）
 - 輸出後停止等使用者確認，不可直接改碼

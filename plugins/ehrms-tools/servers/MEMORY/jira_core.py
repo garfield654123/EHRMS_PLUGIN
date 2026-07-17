@@ -12,6 +12,7 @@ import re
 import jira_db as db
 import memory_core as mc
 import memory_db as mdb
+import pathnorm
 
 KINDS = ("Crisis", "Story")
 DEFAULT_PROJECT = "EHRMSONE"
@@ -61,6 +62,10 @@ def log_case(jira_key, kind, title, root_cause, resolution,
         return "⚠️ title、root_cause、resolution 為必填。"
     if kind == "Story" and not changed_files:
         return "⚠️ Story 紀錄必須提供 changed_files（修改了哪些程式）。"
+    changed_files, path_errs = pathnorm.normalize_lines(changed_files)
+    if path_errs:
+        return ("⚠️ changed_files 需為 **repo 相對路徑**（如 `VB/EHRMS/xx.cls :: 函式`），"
+                "以下無法轉換：\n- " + "\n- ".join(path_errs))
     key = normalize_key(jira_key)
     if not key:
         return (f"⚠️ jira_key 格式錯誤：{jira_key}"
