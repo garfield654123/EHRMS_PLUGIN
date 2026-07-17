@@ -272,17 +272,18 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 
 透過 `EHRMS-jira-mcp` 提供以下工具：
 
+工具設計原則：**預設回最小可用視圖，用參數按需加深**，避免上下文爆量。
+
 | 工具 | 說明 | 使用情境 |
 |------|------|----------|
+| `get_issue` | 單張 Issue 完整內容：全文描述＋最新 N 筆評論（預設 10，新→舊） | 深入看一張單 |
 | `get_issue_summary` | 取得 Issue 基本摘要（輕量） | 快速查看標題與狀態 |
-| `search_issues` | 使用 JQL 搜尋 Issues | 條件篩選多筆 Issue |
-| `get_my_issues` | 取得指定使用者負責的 Issues | 查看個人待辦 |
-| `get_comments` | 取得 Issue 所有評論 | 查看討論紀錄 |
-| `get_attachment` | 下載 Issue 附件 | 取得附件內容 |
-| `get_issue_transitions` | 查看 Issue 可用的狀態轉換 | 了解可以流轉到哪些狀態 |
-| `get_issue_changelog` | 取得 Issue 的變更歷史 | 追蹤修改紀錄 |
+| `search_issues` | JQL 搜尋；預設精簡清單（key/summary/status/assignee/updated），`detail="full"` 回完整欄位 | 掃清單找目標 |
+| `get_comments` | 最新 N 筆評論（預設 20，新→舊，`limit` 可調） | 追蹤討論進度 |
+| `get_attachment` | 下載附件：圖片可直接檢視、文字檔轉純文字（UTF-8/CP950）、其他存本地 | 取得附件內容 |
+| `get_issue_changelog` | 變更歷史（新→舊，預設 50 筆，`fields` 可只看特定欄位流轉） | 追「誰何時改了什麼」 |
 | `get_user_info` | 取得 Jira 用戶資訊 | 查詢用戶帳號資料 |
-| `list_custom_fields` | 列出所有自訂欄位 | 了解 Jira 欄位設定 |
+| `list_custom_fields` | 以關鍵字搜尋自訂欄位（帶 `query` 過濾） | 找 customfield id |
 | `add_comment` | 對 Issue 新增評論 | 回覆或更新進度 |
 
 #### 使用範例
@@ -353,6 +354,10 @@ plugins/ehrms-tools/
 │       ├── memory_db.py     # HRMS_MEMORY 資料層（append-only）
 │       └── hrms_memory.sql # 建表＋View＋最小權限（DBA 執行）
 ├── skills/
+│   ├── crisis-triage/       # 維運單（Crisis 單）查單與除錯流程
+│   ├── mail-query/          # AutoEngine 通知信程式碼定位
+│   ├── test-report/         # Bug Fix 測試步驟撰寫規範
+│   ├── weekly-report/       # 週會報告產生器
 │   ├── mcp-config/          # /mcp-config：MCP 設定管理
 │   ├── setup-guide/         # /setup-guide：安裝設定指引
 │   └── memory-curate/       # /memory-curate：記憶去蕪存菁

@@ -42,7 +42,6 @@ class Config:
         self.base_url = os.getenv("JIRA_BASE_URL")
         self.email = os.getenv("JIRA_EMAIL", "ziping.zhou@104.com.tw")
         self.api_token = os.getenv("JIRA_API_TOKEN")
-        self.default_user = os.getenv("DEFAULT_USER", "ziping.zhou@104.com.tw")
 
         # 驗證必要設定
         if not self.base_url:

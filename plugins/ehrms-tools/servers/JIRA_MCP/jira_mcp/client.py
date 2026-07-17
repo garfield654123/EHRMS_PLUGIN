@@ -1,6 +1,5 @@
 """Jira API client for making authenticated requests."""
 
-import base64
 import json as _json
 import os
 from typing import Any, Optional
@@ -68,7 +67,7 @@ class JiraClient:
         """執行 POST 請求"""
         return await self._request("POST", endpoint, json_data=json_data)
 
-    # search_issues 預設抓取的精簡欄位。
+    # search_issues detail="full" 抓取的欄位。
     # 不可用 *all：EHRMSONE 掛了數百個共用 customfield（多為流程範本文字），
     # 單張 Issue 的完整 JSON 可達 30 萬字元，會超過 MCP 輸出上限。
     DEFAULT_SEARCH_FIELDS = [
@@ -76,9 +75,12 @@ class JiraClient:
         "issuetype", "created", "updated", "duedate", "labels",
         "components", "description", "attachment", "parent",
     ]
+    # detail="list"（預設）的最小清單欄位：掃清單找目標用，細節靠 get_issue 查單筆
+    LIST_FIELDS = ["summary", "status", "assignee", "updated"]
     MAX_SEARCH_RESULTS = 50   # 單次搜尋上限（防上下文爆量）
     MAX_DESC_CHARS = 600      # 清單場景的描述截斷長度；全文請查單筆
     MAX_EXTRA_CHARS = 800     # 額外指定欄位的截斷長度
+    MAX_FULL_DESC_CHARS = 20000  # get_issue 單筆全文的保險上限
 
     async def search_issues(
         self,
@@ -86,7 +88,8 @@ class JiraClient:
         fields: Optional[list[str]] = None,
         max_results: int = 50,
         next_page_token: Optional[str] = None,
-        expand: Optional[list[str]] = None
+        expand: Optional[list[str]] = None,
+        detail: str = "list"
     ) -> dict[str, Any]:
         """
         使用 JQL 搜尋 Issues（v3 search/jql 端點）
@@ -94,8 +97,11 @@ class JiraClient:
         分頁：search/jql 使用 nextPageToken（不支援 startAt）——
         回傳含 next_page_token 時，帶回原參數即可取得下一頁。
 
-        輸出永遠是精簡結構（防上下文爆量）：fields 只能「加欄位」，
-        追加欄位一律 ADF→純文字並截斷，絕不回傳 Jira 原始 JSON。
+        預設精簡、按需加深：
+        - detail="list"（預設）：每筆只回 key/summary/status/assignee/updated，
+          掃清單找目標用；細節用 get_issue 查單筆
+        - detail="full"：回 14 個精簡欄位＋描述截斷（MAX_DESC_CHARS）
+        fields 只能「加欄位」，追加欄位一律 ADF→純文字並截斷，絕不回傳原始 JSON。
 
         Args:
             jql: JQL 查詢字串
@@ -103,13 +109,16 @@ class JiraClient:
             max_results: 單頁筆數（上限 MAX_SEARCH_RESULTS）
             next_page_token: 上一頁回傳的翻頁 token
             expand: 要展開的資源
+            detail: "list"（預設）/ "full"
         """
         max_results = min(int(max_results or 50), self.MAX_SEARCH_RESULTS)
+        full = (detail == "full")
         extra = [x for x in (fields or []) if x and not x.startswith("*")]
+        base = self.DEFAULT_SEARCH_FIELDS if full else self.LIST_FIELDS
         params = {
             "jql": jql,
             "maxResults": max_results,
-            "fields": ",".join(self.DEFAULT_SEARCH_FIELDS + extra),
+            "fields": ",".join(base + extra),
         }
         if next_page_token:
             params["nextPageToken"] = next_page_token
@@ -118,12 +127,35 @@ class JiraClient:
 
         result = await self.get("search/jql", params=params)
 
-        issues = [self._simplify_issue(i, extra) for i in result.get("issues", [])]
+        if full:
+            issues = [self._simplify_issue(i, extra) for i in result.get("issues", [])]
+        else:
+            issues = [self._list_row(i, extra) for i in result.get("issues", [])]
         out: dict[str, Any] = {"count": len(issues), "issues": issues}
+        if not full:
+            out["note"] = "精簡清單模式；單筆細節用 get_issue，整批要更多欄位用 detail=\"full\""
         if not result.get("isLast", True) and result.get("nextPageToken"):
             out["next_page_token"] = result["nextPageToken"]
-            out["note"] = "尚有更多結果，帶 next_page_token 再查一次可取得下一頁"
+            out["more"] = "尚有更多結果，帶 next_page_token 再查一次可取得下一頁"
         return out
+
+    def _list_row(self, issue: dict[str, Any],
+                  extra_fields: Optional[list[str]] = None) -> dict[str, Any]:
+        """detail=\"list\" 的最小清單列。"""
+        f = issue.get("fields", {})
+        row = {
+            "key": issue.get("key"),
+            "summary": f.get("summary", ""),
+            "status": (f.get("status") or {}).get("name", ""),
+            "assignee": (f.get("assignee") or {}).get("displayName", ""),
+            "updated": (f.get("updated") or "")[:10],
+        }
+        for name in extra_fields or []:
+            val = self._field_to_text(f.get(name))
+            if isinstance(val, str) and len(val) > self.MAX_EXTRA_CHARS:
+                val = val[:self.MAX_EXTRA_CHARS] + "…（已截斷）"
+            row[name] = val
+        return row
 
     @classmethod
     def _field_to_text(cls, v: Any) -> Any:
@@ -142,13 +174,16 @@ class JiraClient:
         return v
 
     def _simplify_issue(self, issue: dict[str, Any],
-                        extra_fields: Optional[list[str]] = None) -> dict[str, Any]:
-        """將 Issue 壓縮為精簡結構，ADF 描述轉純文字並截斷"""
+                        extra_fields: Optional[list[str]] = None,
+                        desc_limit: Optional[int] = None) -> dict[str, Any]:
+        """將 Issue 壓縮為精簡結構，ADF 描述轉純文字並截斷。
+        desc_limit：描述截斷長度；不填用清單預設 MAX_DESC_CHARS（附改查單筆提示）。"""
         f = issue.get("fields", {})
         desc = self._adf_to_text(f.get("description")) if f.get("description") else ""
-        if len(desc) > self.MAX_DESC_CHARS:
-            desc = (desc[:self.MAX_DESC_CHARS]
-                    + f"…（已截斷，全文 {len(desc)} 字，需要全文請用 get_issue 查單筆）")
+        limit = self.MAX_DESC_CHARS if desc_limit is None else desc_limit
+        if limit and len(desc) > limit:
+            hint = "，需要全文請用 get_issue 查單筆" if desc_limit is None else ""
+            desc = desc[:limit] + f"…（已截斷，全文 {len(desc)} 字{hint}）"
         simplified = {
             "key": issue.get("key"),
             "summary": f.get("summary", ""),
@@ -331,44 +366,70 @@ class JiraClient:
             "updated": updated,
         }
 
-    async def get_issue_comments(self, issue_key: str) -> dict[str, Any]:
-        """取得 Issue 的所有評論"""
-        return await self.get(f"issue/{issue_key}/comment")
+    MAX_COMMENTS = 500  # limit 上限（「全部」的保險絲）
 
-    async def get_issue_basic(self, issue_key: str) -> dict[str, Any]:
+    async def get_issue_comments(self, issue_key: str, limit: int = 20) -> dict[str, Any]:
+        """取得 Issue 最新的 N 筆評論（新→舊，自動翻頁＋精簡輸出）。
+
+        查案時最新評論才反映現況，故用 orderBy=-created 由新到舊取，
+        預設只拿 limit 筆——不再「全拿」灌爆上下文；要更早的討論調大 limit。
+        body 由 ADF 轉純文字，avatar/accountId 等噪音一律不回傳。"""
+        limit = max(1, min(int(limit or 20), self.MAX_COMMENTS))
+        start, total, comments = 0, 0, []
+        while len(comments) < limit:
+            page = await self.get(
+                f"issue/{issue_key}/comment",
+                params={"startAt": start, "orderBy": "-created",
+                        "maxResults": min(100, limit - len(comments))})
+            total = page.get("total", 0)
+            batch = page.get("comments", [])
+            for c in batch:
+                item = {
+                    "author": (c.get("author") or {}).get("displayName", ""),
+                    "created": (c.get("created") or "")[:16].replace("T", " "),
+                    "body": self._adf_to_text(c.get("body")),
+                }
+                updated = (c.get("updated") or "")[:16].replace("T", " ")
+                if updated and updated != item["created"]:
+                    item["updated"] = updated
+                comments.append(item)
+            start += len(batch)
+            if not batch or start >= total:
+                break
+        out: dict[str, Any] = {"issue": issue_key, "total": total,
+                               "order": "新→舊", "comments": comments}
+        if len(comments) < total:
+            out["note"] = f"評論共 {total} 筆，回傳最新 {len(comments)} 筆；要更早的討論請調大 limit"
+        return out
+
+    async def get_issue_basic(self, issue_key: str,
+                              comments_limit: int = 10) -> dict[str, Any]:
         """
-        取得 Issue 的基本欄位與評論（輕量查詢）
+        取得單張 Issue 的完整內容（單筆全文視角）
 
-        只抓取基本欄位（透過 get_issue_summary）與評論，不抓 *all 全欄位，
-        評論 body 會由 ADF 轉為純文字以節省資源。
+        回傳精簡欄位結構＋完整描述（ADF→純文字，保險上限 MAX_FULL_DESC_CHARS）
+        ＋最新 comments_limit 筆評論（新→舊）。
+        search_issues 截斷描述後指引到本方法，這裡必須給得出全文。
 
         Args:
             issue_key: Issue 的 Key (例如: PROJ-123)
+            comments_limit: 評論筆數（預設 10；0=不帶評論）
 
         Returns:
-            dict: 基本欄位 + comment_total + comments[]
+            dict: 精簡欄位 + description 全文 + comment_total + comments[]（新→舊）
         """
-        summary = await self.get_issue_summary(issue_key)
-        comments_raw = await self.get_issue_comments(issue_key)
+        issue = await self.get_issue(
+            issue_key, fields=list(self.DEFAULT_SEARCH_FIELDS), plain_text=False)
+        data = self._simplify_issue(issue, desc_limit=self.MAX_FULL_DESC_CHARS)
 
-        comments = []
-        for c in comments_raw.get("comments", []):
-            comments.append({
-                "author": (c.get("author") or {}).get("displayName", ""),
-                "created": (c.get("created") or "")[:10],
-                "updated": (c.get("updated") or "")[:10],
-                "body": self._adf_to_text(c.get("body")),
-            })
-
-        return {
-            **summary,
-            "comment_total": comments_raw.get("total", len(comments)),
-            "comments": comments,
-        }
-
-    async def get_issue_worklogs(self, issue_key: str) -> dict[str, Any]:
-        """取得 Issue 的所有工時記錄"""
-        return await self.get(f"issue/{issue_key}/worklog")
+        if comments_limit and int(comments_limit) > 0:
+            result = await self.get_issue_comments(issue_key, limit=comments_limit)
+            data["comment_total"] = result.get("total", 0)
+            data["comments"] = result.get("comments", [])
+            data["comments_order"] = "新→舊"
+            if result.get("note"):
+                data["comments_note"] = result["note"]
+        return data
 
     async def download_attachment_content(self, content_url: str) -> bytes:
         """
@@ -388,29 +449,6 @@ class JiraClient:
             )
             response.raise_for_status()
             return response.content
-
-    async def download_attachment_as_base64(self, content_url: str) -> dict[str, Any]:
-        """
-        下載附件並轉換為 base64 格式
-
-        Args:
-            content_url: 附件的下載 URL
-        """
-        try:
-            content = await self.download_attachment_content(content_url)
-            base64_content = base64.b64encode(content).decode('utf-8')
-            file_extension = content_url.split('.')[-1].lower() if '.' in content_url else 'unknown'
-            is_image = file_extension in ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg']
-            return {
-                "success": True,
-                "base64_content": base64_content,
-                "file_size": len(content),
-                "file_extension": file_extension,
-                "is_image": is_image,
-                "mime_type": self._get_mime_type(file_extension)
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
 
     async def download_attachment_to_local(
         self,
@@ -441,54 +479,6 @@ class JiraClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def download_image_as_base64(
-        self,
-        content_url: str,
-        filename: str
-    ) -> dict[str, Any]:
-        """
-        下載圖片並轉換為 base64 格式
-
-        Args:
-            content_url: 附件的下載 URL
-            filename: 檔案名稱
-        """
-        try:
-            content = await self.download_attachment_content(content_url)
-            base64_content = base64.b64encode(content).decode('utf-8')
-            file_extension = filename.split('.')[-1].lower() if '.' in filename else ''
-            is_image = file_extension in ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg']
-            return {
-                "success": True,
-                "filename": filename,
-                "file_size": len(content),
-                "is_image": is_image,
-                "file_extension": file_extension,
-                "mime_type": self._get_mime_type(file_extension),
-                "base64_content": base64_content
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def _get_mime_type(self, file_extension: str) -> str:
-        """根據檔案副檔名取得 MIME 類型"""
-        mime_types = {
-            'png': 'image/png',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'gif': 'image/gif',
-            'bmp': 'image/bmp',
-            'webp': 'image/webp',
-            'svg': 'image/svg+xml',
-            'pdf': 'application/pdf',
-            'txt': 'text/plain',
-            'doc': 'application/msword',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'xls': 'application/vnd.ms-excel',
-            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        }
-        return mime_types.get(file_extension.lower(), 'application/octet-stream')
-
     async def get_custom_fields(self) -> list[dict[str, Any]]:
         """取得所有自訂欄位的定義"""
         return await self.get("field")
@@ -511,34 +501,71 @@ class JiraClient:
         adf_body = {"version": 1, "type": "doc", "content": content}
         return await self.post(f"issue/{issue_key}/comment", json_data={"body": adf_body})
 
-    async def get_issue_transitions(self, issue_key: str) -> dict[str, Any]:
-        """取得 Issue 的可用轉換狀態 (符合 Jira REST API v3 標準)"""
-        return await self.get(f"issue/{issue_key}/transitions")
+    async def get_issue_changelog(self, issue_key: str, limit: int = 50,
+                                  fields: Optional[list[str]] = None,
+                                  max_pages: int = 10) -> dict[str, Any]:
+        """取得 Issue 變更歷史（最新優先＋精簡輸出＋可過濾欄位）。
 
-    async def get_issue_changelog(self, issue_key: str, max_pages: int = 10) -> dict[str, Any]:
-        """取得 Issue 完整變更歷史（自動翻頁＋精簡輸出）。
+        changelog 端點由舊到新分頁（無法反序），策略：
+        - 無 fields 過濾：先探 total，只抓尾端頁（最新的 limit 筆）
+        - 有 fields 過濾：全抓（上限 max_pages 頁）後過濾再取最新 limit 筆
+        輸出精簡為 (時間, 操作者, 欄位 from→to)，新→舊排序。"""
+        limit = max(1, min(int(limit or 50), 500))
+        want = set(x.strip().lower() for x in (fields or []) if x and x.strip())
 
-        changelog 端點每頁上限 100 筆，依 isLast 自動翻頁；
-        輸出精簡為 (時間, 操作者, 欄位 from→to)，避免原始 JSON 撐爆上下文。"""
-        start, entries = 0, []
-        for _ in range(max_pages):
-            page = await self.get(f"issue/{issue_key}/changelog",
-                                  params={"startAt": start, "maxResults": 100})
-            values = page.get("values", [])
-            for h in values:
-                entries.append({
+        async def fetch(start_at: int) -> dict:
+            return await self.get(f"issue/{issue_key}/changelog",
+                                  params={"startAt": start_at, "maxResults": 100})
+
+        entries = []
+        if want:
+            start = 0
+            for _ in range(max_pages):
+                page = await fetch(start)
+                values = page.get("values", [])
+                entries.extend(values)
+                if page.get("isLast", True) or not values:
+                    break
+                start += len(values)
+            total_all = len(entries)
+        else:
+            probe = await fetch(0)
+            total_all = probe.get("total", 0)
+            start = max(0, total_all - limit)
+            values = probe.get("values", []) if start == 0 else []
+            while True:
+                if not values:
+                    page = await fetch(start)
+                    values = page.get("values", [])
+                    if not values:
+                        break
+                entries.extend(values)
+                start += len(values)
+                if start >= total_all:
+                    break
+                values = []
+
+        out = []
+        for h in entries:
+            changes = [
+                {"field": i.get("field"),
+                 "from": i.get("fromString"), "to": i.get("toString")}
+                for i in h.get("items", [])
+                if not want or (i.get("field") or "").lower() in want
+            ]
+            if changes:
+                out.append({
                     "at": (h.get("created") or "")[:16].replace("T", " "),
                     "by": (h.get("author") or {}).get("displayName", ""),
-                    "changes": [
-                        {"field": i.get("field"),
-                         "from": i.get("fromString"), "to": i.get("toString")}
-                        for i in h.get("items", [])
-                    ],
+                    "changes": changes,
                 })
-            if page.get("isLast", True) or not values:
-                break
-            start += len(values)
-        return {"issue": issue_key, "total": len(entries), "changelog": entries}
+        out.reverse()  # 新→舊
+        result: dict[str, Any] = {"issue": issue_key, "total_changes": total_all,
+                                  "returned": min(len(out), limit),
+                                  "order": "新→舊", "changelog": out[:limit]}
+        if len(out) > limit:
+            result["note"] = f"符合條件共 {len(out)} 筆，回傳最新 {limit} 筆；要更早的請調大 limit"
+        return result
 
     async def get_user_info(self, username: Optional[str] = None) -> Any:
         """取得用戶資訊。
@@ -557,29 +584,6 @@ class JiraClient:
                                    params={"query": username, "maxResults": 10})
             return [slim(u) for u in users]
         return slim(await self.get("myself"))
-
-    async def get_user_issues(
-        self,
-        user_email: Optional[str] = None,
-        status: Optional[str] = None,
-        max_results: int = 50
-    ) -> dict[str, Any]:
-        """
-        取得特定使用者的 Issues
-
-        Args:
-            user_email: 使用者 Email (預設使用 DEFAULT_USER)
-            status: Issue 狀態過濾
-            max_results: 最大結果數量
-        """
-        email = user_email or config.default_user
-        jql = f'assignee = "{email}"'
-
-        if status:
-            jql += f' AND status = "{status}"'
-
-        return await self.search_issues(jql, max_results=max_results)
-
 
 # 全域客戶端實例
 jira_client = JiraClient()

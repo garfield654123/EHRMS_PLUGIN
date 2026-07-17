@@ -18,7 +18,7 @@ from mcp.types import (
 import uvicorn
 
 from .client import JiraClient, jira_client
-from .config import config, ServerConfig, JiraCredentials
+from .config import ServerConfig, JiraCredentials
 
 # 儲存當次 HTTP 請求的 Jira 認證（HTTP 模式 per-request 使用）
 _request_credentials: ContextVar[Optional[JiraCredentials]] = ContextVar(
@@ -33,6 +33,36 @@ def _get_client() -> JiraClient:
         return JiraClient(credentials=credentials)
     return jira_client
 
+# ── 附件回傳的防爆量參數 ─────────────────────────────────────
+# Claude API 可直接檢視的影像格式；bmp/svg 等一律走 local
+VIEWABLE_IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+TEXT_MIMES = {"application/json", "application/xml", "application/x-yaml",
+              "application/javascript", "application/sql"}
+TEXT_EXTS = {"txt", "log", "csv", "md", "json", "xml", "yaml", "yml", "sql",
+             "ini", "cfg", "conf", "config", "properties", "html", "htm",
+             "js", "css", "py", "cs", "java", "vb", "aspx"}
+MAX_IMAGE_BYTES = 3 * 1024 * 1024   # ImageContent 上限（API 影像限制 5MB，留 base64 膨脹裕度）
+MAX_BASE64_BYTES = 1 * 1024 * 1024  # base64 文字回傳上限（膨脹 4/3 後仍在輸出限制內）
+MAX_TEXT_CHARS = 50_000             # text 模式截斷長度
+
+
+def _is_text_attachment(mime_type: str, filename: str) -> bool:
+    if (mime_type or "").startswith("text/") or mime_type in TEXT_MIMES:
+        return True
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return ext in TEXT_EXTS
+
+
+def _decode_attachment_text(content: bytes) -> str:
+    # 客戶端文字檔常見 UTF-8（含 BOM）與 Big5/CP950；latin1 只當最後保底
+    for enc in ("utf-8-sig", "cp950"):
+        try:
+            return content.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return content.decode("latin1", errors="ignore")
+
+
 # 建立 MCP 伺服器實例
 mcp_server = Server("jira-mcp-server")
 
@@ -46,13 +76,18 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="get_issue",
-            description="取得 Issue 的基本欄位與評論（輕量查詢）。一次回傳 key、summary、status、assignee、priority、issue_type、created、updated 與所有評論（純文字），不抓取全部欄位以節省資源。",
+            description="取得單張 Issue 的完整內容：精簡欄位＋**完整描述**（ADF 轉純文字）＋**最新 N 筆評論**（新→舊，預設 10）。查單筆全文用這個；要更早的評論調大 comments_limit 或用 get_comments。",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "issue_key": {
                         "type": "string",
                         "description": "Issue 的 Key，例如: PROJ-123"
+                    },
+                    "comments_limit": {
+                        "type": "number",
+                        "description": "評論筆數（預設 10，最新優先；0=不帶評論）",
+                        "default": 10
                     }
                 },
                 "required": ["issue_key"]
@@ -74,13 +109,19 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="search_issues",
-            description="使用 JQL 搜尋 Jira Issues。永遠回傳精簡結構（key、summary、status、assignee、reporter、priority、issue_type、created、updated、duedate、labels、components、description[截斷]、attachments、parent），描述已轉純文字並截斷——需要單筆全文請改用 get_issue。fields 可追加額外欄位（如 customfield_12722），追加欄位也會轉純文字並截斷，不會回傳原始 JSON。單頁上限 50 筆；回傳含 next_page_token 時帶回原參數可取下一頁。",
+            description="使用 JQL 搜尋 Jira Issues。預設回精簡清單（每筆只有 key、summary、status、assignee、updated）——掃清單找目標用，單筆細節請用 get_issue；detail=\"full\" 才回 14 個欄位＋描述截斷。fields 可追加額外欄位（如 customfield_12722），追加欄位轉純文字並截斷。單頁上限 50 筆；回傳含 next_page_token 時帶回原參數可取下一頁。",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "jql": {
                         "type": "string",
                         "description": 'JQL 查詢字串，例如: "project = MYPROJ AND status = Open"'
+                    },
+                    "detail": {
+                        "type": "string",
+                        "enum": ["list", "full"],
+                        "description": "list（預設）：最小清單欄位；full：14 欄＋描述截斷",
+                        "default": "list"
                     },
                     "max_results": {
                         "type": "number",
@@ -90,7 +131,7 @@ async def list_tools() -> list[Tool]:
                     "fields": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "要「追加」的欄位清單，例如: [\"customfield_12722\"]。基本精簡欄位一律回傳；*all 無效"
+                        "description": "要「追加」的欄位清單，例如: [\"customfield_12722\"]；*all 無效"
                     },
                     "next_page_token": {
                         "type": "string",
@@ -101,36 +142,19 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
-            name="get_my_issues",
-            description=f"取得指定使用者的 Issues（預設使用者: {config.default_user}）",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "user_email": {
-                        "type": "string",
-                        "description": f"使用者 Email（預設: {config.default_user}）"
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": "過濾特定狀態，例如: Open, In Progress, Done（選填）"
-                    },
-                    "max_results": {
-                        "type": "number",
-                        "description": "最大結果數量（預設: 50）",
-                        "default": 50
-                    }
-                }
-            }
-        ),
-        Tool(
             name="get_comments",
-            description="取得 Issue 的所有評論",
+            description="取得 Issue 最新的 N 筆評論（新→舊，預設 20；body 由 ADF 轉純文字精簡輸出）。要更早的討論調大 limit。",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "issue_key": {
                         "type": "string",
                         "description": "Issue 的 Key，例如: PROJ-123"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "評論筆數（預設 20，最新優先，上限 500）",
+                        "default": 20
                     }
                 },
                 "required": ["issue_key"]
@@ -138,7 +162,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_attachment",
-            description="下載並取得附件內容，支援 base64、local、text 三種回傳模式。合併了原本的 download_attachment_as_base64、download_image_as_base64、download_attachment_to_local。",
+            description="下載並取得附件內容。auto 模式（預設）依類型自動處理：圖片（png/jpg/gif/webp）以可檢視影像回傳（AI 可直接看圖）、文字檔轉純文字（自動嘗試 UTF-8/CP950 編碼）、其他類型存到本地資料夾。內建大小防護，超過上限會提示改用 output=local。",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -152,8 +176,9 @@ async def list_tools() -> list[Tool]:
                     },
                     "output": {
                         "type": "string",
-                        "description": "base64（預設）/ local / text",
-                        "default": "base64"
+                        "enum": ["auto", "image", "text", "base64", "local"],
+                        "description": "auto（預設）：依附件類型自動選擇；也可強制指定 image / text / base64 / local",
+                        "default": "auto"
                     },
                     "download_folder": {
                         "type": "string",
@@ -164,28 +189,24 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
-            name="get_issue_transitions",
-            description="取得 Issue 的可用轉換狀態 (符合 Jira REST API v3 標準)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "issue_key": {
-                        "type": "string",
-                        "description": "Issue 的 Key，例如: PROJ-123"
-                    }
-                },
-                "required": ["issue_key"]
-            }
-        ),
-        Tool(
             name="get_issue_changelog",
-            description="取得 Issue 的完整變更歷史（自動翻頁），精簡輸出為 (時間, 操作者, 欄位 from→to) 列表。",
+            description="取得 Issue 的變更歷史，精簡輸出為 (時間, 操作者, 欄位 from→to)，新→舊排序，預設最新 50 筆。fields 可只看特定欄位的流轉（如 [\"status\"] 或 [\"assignee\"]）。",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "issue_key": {
                         "type": "string",
                         "description": "Issue 的 Key，例如: PROJ-123"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "回傳筆數（預設 50，最新優先）",
+                        "default": 50
+                    },
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "只看這些欄位的變更，例如 [\"status\", \"assignee\"]（選填，欄位名不分大小寫）"
                     }
                 },
                 "required": ["issue_key"]
@@ -207,10 +228,15 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="list_custom_fields",
-            description="列出 Jira 中所有的自訂欄位定義",
+            description="搜尋 Jira 自訂欄位定義（EHRMSONE 有數百個自訂欄位，請帶 query 關鍵字過濾，例如「Engineer」「工號」；回傳 id、name、type）。",
             inputSchema={
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "欄位名稱或 id 的關鍵字（不分大小寫）。不填只回傳總數統計"
+                    }
+                }
             }
         ),
         Tool(
@@ -243,7 +269,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
         if name == "get_issue":
             issue_key = arguments["issue_key"]
-            result = await client.get_issue_basic(issue_key)
+            comments_limit = int(arguments.get("comments_limit", 10))
+            result = await client.get_issue_basic(issue_key, comments_limit=comments_limit)
             return [TextContent(
                 type="text",
                 text=json.dumps(result, ensure_ascii=False, indent=2)
@@ -262,23 +289,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             max_results = arguments.get("max_results", 50)
             fields = arguments.get("fields")
             next_page_token = arguments.get("next_page_token")
+            detail = arguments.get("detail", "list")
             result = await client.search_issues(
                 jql=jql, fields=fields, max_results=max_results,
-                next_page_token=next_page_token)
-            return [TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, ensure_ascii=False)
-            )]
-
-        elif name == "get_my_issues":
-            user_email = arguments.get("user_email")
-            status = arguments.get("status")
-            max_results = arguments.get("max_results", 50)
-            result = await client.get_user_issues(
-                user_email=user_email,
-                status=status,
-                max_results=max_results
-            )
+                next_page_token=next_page_token, detail=detail)
             return [TextContent(
                 type="text",
                 text=json.dumps(result, indent=2, ensure_ascii=False)
@@ -286,7 +300,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
         elif name == "get_comments":
             issue_key = arguments["issue_key"]
-            result = await client.get_issue_comments(issue_key)
+            limit = int(arguments.get("limit", 20))
+            result = await client.get_issue_comments(issue_key, limit=limit)
             return [TextContent(
                 type="text",
                 text=json.dumps(result, indent=2, ensure_ascii=False)
@@ -295,7 +310,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         elif name == "get_attachment":
             issue_key = arguments["issue_key"]
             filename = arguments["filename"]
-            output = arguments.get("output", "base64")
+            output = arguments.get("output", "auto")
             download_folder = arguments.get("download_folder", "downloads")
 
             issue = await client.get_issue(issue_key, fields=["attachment"], plain_text=False)
@@ -303,13 +318,53 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             target_attachment = next((att for att in attachments if att["filename"] == filename), None)
 
             if not target_attachment:
-                return [TextContent(type="text", text=f"找不到檔名為 '{filename}' 的附件")]
+                names = [a.get("filename", "") for a in attachments]
+                return [TextContent(
+                    type="text",
+                    text=f"找不到檔名為 '{filename}' 的附件。此單的附件清單：{names}")]
 
             content_url = target_attachment["content"]
-            mime_type = target_attachment["mimeType"]
+            mime_type = target_attachment.get("mimeType", "application/octet-stream")
+            size = target_attachment.get("size") or 0
 
-            if output == "base64":
+            if output == "auto":
+                if mime_type in VIEWABLE_IMAGE_MIMES:
+                    output = "image"
+                elif _is_text_attachment(mime_type, filename):
+                    output = "text"
+                else:
+                    output = "local"
+
+            if output == "image":
+                if mime_type not in VIEWABLE_IMAGE_MIMES:
+                    return [TextContent(
+                        type="text",
+                        text=f"'{filename}'（{mime_type}）不是可直接檢視的圖片格式，請改用 output=local 下載")]
+                if size > MAX_IMAGE_BYTES:
+                    return [TextContent(
+                        type="text",
+                        text=f"圖片過大（{size:,} bytes，上限 {MAX_IMAGE_BYTES:,}），請改用 output=local 下載後以 Read 工具檢視")]
                 content = await client.download_attachment_content(content_url)
+                return [
+                    ImageContent(
+                        type="image",
+                        data=base64.b64encode(content).decode("utf-8"),
+                        mimeType=mime_type),
+                    TextContent(
+                        type="text",
+                        text=f"{filename}（{mime_type}，{len(content):,} bytes）"),
+                ]
+
+            elif output == "base64":
+                if size > MAX_BASE64_BYTES:
+                    return [TextContent(
+                        type="text",
+                        text=f"附件過大（{size:,} bytes，base64 回傳上限 {MAX_BASE64_BYTES:,}），請改用 output=local")]
+                content = await client.download_attachment_content(content_url)
+                if len(content) > MAX_BASE64_BYTES:
+                    return [TextContent(
+                        type="text",
+                        text=f"附件過大（{len(content):,} bytes，base64 回傳上限 {MAX_BASE64_BYTES:,}），請改用 output=local")]
                 base64_content = base64.b64encode(content).decode("utf-8")
                 return [TextContent(type="text", text=json.dumps({
                     "filename": filename,
@@ -332,26 +387,20 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
             elif output == "text":
                 content = await client.download_attachment_content(content_url)
-                try:
-                    text = content.decode("utf-8")
-                except Exception:
-                    text = content.decode("latin1", errors="ignore")
+                text = _decode_attachment_text(content)
+                if len(text) > MAX_TEXT_CHARS:
+                    text = (text[:MAX_TEXT_CHARS]
+                            + f"\n…（已截斷，全文 {len(text):,} 字，完整檔案請改用 output=local）")
                 return [TextContent(type="text", text=text)]
 
             else:
                 return [TextContent(type="text", text=f"不支援的 output 參數: {output}")]
 
-        elif name == "get_issue_transitions":
-            issue_key = arguments["issue_key"]
-            result = await client.get_issue_transitions(issue_key)
-            return [TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, ensure_ascii=False)
-            )]
-
         elif name == "get_issue_changelog":
             issue_key = arguments["issue_key"]
-            result = await client.get_issue_changelog(issue_key)
+            limit = int(arguments.get("limit", 50))
+            fields = arguments.get("fields")
+            result = await client.get_issue_changelog(issue_key, limit=limit, fields=fields)
             return [TextContent(
                 type="text",
                 text=json.dumps(result, indent=2, ensure_ascii=False)
@@ -375,20 +424,28 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             )]
 
         elif name == "list_custom_fields":
+            query = (arguments.get("query") or "").strip().lower()
             all_fields = await client.get_custom_fields()
-            custom_fields = [
+            customs = [f for f in all_fields if f["id"].startswith("customfield_")]
+            if not query:
+                return [TextContent(
+                    type="text",
+                    text=f"共 {len(customs)} 個自訂欄位。請帶 query 關鍵字（欄位名稱或 id）過濾，避免一次回傳全部。")]
+            hits = [
                 {
-                    "id": field["id"],
-                    "name": field["name"],
-                    "custom": field.get("custom", False),
-                    "schema": field.get("schema", {})
+                    "id": f["id"],
+                    "name": f["name"],
+                    "type": (f.get("schema") or {}).get("type", ""),
                 }
-                for field in all_fields
-                if field["id"].startswith("customfield_")
+                for f in customs
+                if query in f["name"].lower() or query in f["id"].lower()
             ]
+            out: dict = {"count": len(hits), "fields": hits[:30]}
+            if len(hits) > 30:
+                out["note"] = f"符合 {len(hits)} 個，僅回傳前 30 個，請縮小關鍵字"
             return [TextContent(
                 type="text",
-                text=json.dumps(custom_fields, indent=2, ensure_ascii=False)
+                text=json.dumps(out, indent=2, ensure_ascii=False)
             )]
 
         else:

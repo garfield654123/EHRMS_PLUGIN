@@ -1,0 +1,106 @@
+# HRMS_NOTIFY 相關表格欄位說明
+
+## HRMS_NOTIFY_REFERENCE（通知主設定表）
+
+每筆代表一種通知類型，由 NOTIFY_REFERENCE_CODE 識別。
+
+| 欄位 | 說明 |
+|------|------|
+| NOTIFY_REFERENCE_ID | PK |
+| COMPANY_ID | 公司 ID |
+| NOTIFY_DESCRIPTION | 通知名稱（中文），如「試用期滿」、「契約到期」 |
+| NOTIFY_REFERENCE_CODE | 通知代碼，如 SNR01、SNR02 |
+| NOTIFY_TYPE | 通知類型（0=... 依系統版本定義） |
+| NOTIFY_FREQUENCY | 寄發頻率 |
+| EXPIRE_DAYS | 到期前幾天寄發 |
+| INTERVAL_DAYS | 重複寄發間隔天數 |
+| NOTIFY_REFERENCE_START | 是否啟用（`1`=啟用，`0`=停用） |
+| NOTIFY_MEMBER | 收件人設定 |
+| TOPIC_MYSELF | 本人收到的主旨 |
+| TOPIC_FIRST_BOSS | 一階主管收到的主旨 |
+| TOPIC_SECOND_BOSS | 二階主管收到的主旨 |
+| TOPIC_SALES | 業務收到的主旨 |
+| LETTER_MYSELF | 本人收到的信件內文 |
+| LETTER_FIRST_BOSS | 一階主管收到的信件內文 |
+| LETTER_SECOND_BOSS | 二階主管收到的信件內文 |
+| LETTER_SALES | 業務收到的信件內文 |
+| NOTIFY_CLASS | 通知分類 |
+| NOTIFY_ALLOWANCE_MEMBER_TYPE | 收件人類型設定 |
+
+### 常用查詢
+
+查某通知的完整設定：
+```sql
+SELECT NOTIFY_REFERENCE_CODE, NOTIFY_DESCRIPTION,
+       NOTIFY_REFERENCE_START, EXPIRE_DAYS, INTERVAL_DAYS,
+       TOPIC_MYSELF, TOPIC_FIRST_BOSS, TOPIC_SECOND_BOSS
+FROM HRMS_NOTIFY_REFERENCE
+WHERE COMPANY_ID = @COMPANY_ID
+  AND NOTIFY_DESCRIPTION LIKE '%關鍵字%'
+```
+
+查所有已啟用的通知：
+```sql
+SELECT NOTIFY_REFERENCE_CODE, NOTIFY_DESCRIPTION, NOTIFY_TYPE
+FROM HRMS_NOTIFY_REFERENCE
+WHERE COMPANY_ID = @COMPANY_ID
+  AND NOTIFY_REFERENCE_START = '1'
+ORDER BY NOTIFY_REFERENCE_CODE
+```
+
+---
+
+## HRMS_NOTIFY_MESSAGE（通知發送記錄）
+
+記錄每筆已判斷需寄出的通知（不代表寄信成功）。
+
+| 欄位 | 說明 |
+|------|------|
+| NOTIFY_MESSAGE_ID | PK |
+| EMPLOYEE_ID | 員工 ID |
+| NOTIFY_REFERENCE_ID | FK → HRMS_NOTIFY_REFERENCE |
+| NOTIFY_MESSAGE_DATE | 通知寄發日期 |
+| NOTIFY_MESSAGE_ITEM_DATE | 通知事件日期（如合約到期日） |
+| SQL | 當時使用的 SQL 語句（debug 用） |
+
+### 常用查詢
+
+查某員工的通知記錄：
+```sql
+SELECT m.NOTIFY_MESSAGE_DATE, m.NOTIFY_MESSAGE_ITEM_DATE,
+       r.NOTIFY_DESCRIPTION, r.NOTIFY_REFERENCE_CODE
+FROM HRMS_NOTIFY_MESSAGE m
+JOIN HRMS_NOTIFY_REFERENCE r ON m.NOTIFY_REFERENCE_ID = r.NOTIFY_REFERENCE_ID
+WHERE m.EMPLOYEE_ID = @EMPLOYEE_ID
+ORDER BY m.NOTIFY_MESSAGE_DATE DESC
+```
+
+---
+
+## HRMS_NOTIFY（通知主體）
+
+| 欄位 | 說明 |
+|------|------|
+| NOTIFY_ID | PK |
+| NOTIFY_FROM | 來源（FK） |
+| NOTIFY_SUBJECT | 主旨 |
+| NOTIFY_BODY | 內文 |
+
+---
+
+## HRMS_AUTO_JOB（排程設定）
+
+查排程執行時間設定，確認 AutoEngine 是否有設定特定通知的排程。
+
+---
+
+## HRMS_AUTO_JOB_LOG（排程執行記錄）
+
+查特定通知是否有被排程執行：
+```sql
+SELECT TOP 20 *
+FROM HRMS_AUTO_JOB_LOG
+WHERE JOB_NAME LIKE '%NOTIFY%'
+   OR JOB_NAME LIKE '%通知%'
+ORDER BY CREATE_DATE DESC
+```

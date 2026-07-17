@@ -72,7 +72,7 @@ description: 管理 Claude Code MCP 伺服器設定，支援新增 JIRA MCP 與 
 "jira-mcp": {
   "type": "stdio", "command": "py", "args": ["-m", "jira_mcp"],
   "env": { "JIRA_BASE_URL": "...", "JIRA_EMAIL": "...", "JIRA_API_TOKEN": "...",
-           "DEFAULT_USER": "<email>", "TRANSPORT": "stdio", "PYTHONPATH": "<dir>" }
+           "TRANSPORT": "stdio", "PYTHONPATH": "<dir>" }
 }
 ```
 
