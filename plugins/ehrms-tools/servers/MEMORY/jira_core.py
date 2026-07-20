@@ -6,6 +6,9 @@
   修正結論帶 supersedes=舊ID——僅允許同單號，append-only 永不 UPDATE/DELETE
 - 查詢 jira_lookup：單號 → 精確查該單；問題敘述 → 關鍵字相似度檢索
   （評分器重用 memory_core 的中文 bigram＋關鍵字比對）
+- 人工審核 REVIEW_STATUS（DB 端維護，MCP 只讀）：
+  verified=根因已人工確認 → 相似檢索優先引用；
+  rejected=結論錯誤 → 檢索排除（取代者被 reject 時舊版復活，同 memory_core）
 """
 import re
 
@@ -32,10 +35,13 @@ def normalize_key(s):
 
 
 def active_rows(rows=None):
-    """有效集合：排除被 supersede 取代的舊版本。"""
+    """有效集合：排除 rejected（人工判定結論錯誤）與被取代的舊版本。
+    取代者本身被 reject 時，被取代的舊版自動復活（同 memory_core）。"""
     rows = rows if rows is not None else db.load_all()
-    superseded = {r["supersedes"] for r in rows if r["supersedes"]}
-    return [r for r in rows if r["id"] not in superseded]
+    superseded = {r["supersedes"] for r in rows
+                  if r["supersedes"] and r["review"] != "rejected"}
+    return [r for r in rows
+            if r["review"] != "rejected" and r["id"] not in superseded]
 
 
 def _fmt(r, score=None):
@@ -47,7 +53,8 @@ def _fmt(r, score=None):
              f"  解法：{r['resolution']}"]
     if r["changed_files"]:
         lines.append(f"  修改：{r['changed_files']}")
-    lines.append(f"  <sub>{r['created_by']}・{r['created_at']}</sub>")
+    flag = "✅已審核" if r["review"] == "verified" else "⏳未審核"
+    lines.append(f"  <sub>{r['created_by']}・{r['created_at']}・{flag}</sub>")
     return lines
 
 
@@ -112,7 +119,8 @@ def log_case(jira_key, kind, title, root_cause, resolution,
     out = [f"✅ 已記錄（{kind}，紀錄 ID **{new_id}**）{key}【{title}】"]
     if sup_id:
         out.append(f"↺ 已取代舊紀錄 ID {sup_id}（檢索不再回傳舊結論）")
-    out.append(f"記錄者：{mdb.created_by()}")
+    out.append(f"記錄者：{mdb.created_by()}・審核狀態：⏳未審核"
+               f"（根因確認後由人工於 DB 端標記 verified）")
     return "\n".join(out)
 
 
@@ -153,10 +161,22 @@ def lookup(query, kind=None, top_k=5):
         if sc >= LOOKUP_THRESHOLD:
             scored.append((sc, r))
     scored.sort(key=lambda x: -x[0])
-    scored = scored[:int(top_k or 5)]
     if not scored:
         return f"# HRMS_JIRA 檢索：{query}\n\n（無相似案件）"
+
+    # 已審核（根因經人工確認）優先佔位，未審核只補剩餘名額
+    top_k = int(top_k or 5)
+    ver = [(sc, r) for sc, r in scored if r["review"] == "verified"][:top_k]
+    pend = [(sc, r) for sc, r in scored
+            if r["review"] != "verified"][:top_k - len(ver)]
+
     out = [f"# HRMS_JIRA 檢索：{query}"]
-    for sc, r in scored:
-        out.extend(_fmt(r, sc))
+    if ver:
+        out.append("\n## ✅ 已審核案例（根因經人工確認，優先參考）")
+        for sc, r in ver:
+            out.extend(_fmt(r, sc))
+    if pend:
+        out.append("\n## ⏳ 未審核案例（僅供參考，結論未經人工確認）")
+        for sc, r in pend:
+            out.extend(_fmt(r, sc))
     return "\n".join(out)

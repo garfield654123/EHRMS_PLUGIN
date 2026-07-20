@@ -32,9 +32,10 @@ def load_all():
     rows = []
     for r in cur.execute(
             f"SELECT ID,JIRA_KEY,ISSUE_KIND,TITLE,ROOT_CAUSE,RESOLUTION,"
-            f"CHANGED_FILES,KEYWORDS,SUPERSEDES_ID,CREATED_BY,CREATED_AT,META FROM {T}"):
+            f"CHANGED_FILES,KEYWORDS,SUPERSEDES_ID,CREATED_BY,CREATED_AT,"
+            f"REVIEW_STATUS,META FROM {T}"):
         try:
-            meta = json.loads(r[11]) if r[11] else {}
+            meta = json.loads(r[12]) if r[12] else {}
         except Exception:
             meta = {}
         rows.append({
@@ -43,6 +44,7 @@ def load_all():
             "resolution": r[5] or "", "changed_files": r[6] or "",
             "keywords": r[7] or "", "supersedes": r[8],
             "created_by": r[9] or "", "created_at": str(r[10])[:10],
+            "review": (r[11] or "").strip(),
             "meta": meta,
         })
     _cache["all"] = (now, rows)

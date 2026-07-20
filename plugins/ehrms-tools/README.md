@@ -306,8 +306,13 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 |------|------|
 | `recall` | 檢索記憶，System/Engineer 分組回傳；命中自動累計引用次數。查案流程第一步呼叫 |
 | `remember` | 寫入記憶（唯一寫入口，內建去重）；`supersedes=舊ID` 完成訂正。結論確認後呼叫 |
-| `jira_lookup` | 查結案紀錄：給單號 → 精確查該單；給問題敘述 → 相似案件檢索。查案開頭與 recall 並行 |
-| `jira_log` | 寫入結案紀錄（單號/單型/根因/解法/修改程式）；同單重複會擋下，修正結論帶 `supersedes=舊ID`。Crisis=維運單、Story=改程式與 bug fix（changed_files 必填） |
+| `jira_lookup` | 查結案紀錄：給單號 → 精確查該單；給問題敘述 → 相似案件檢索（✅已審核案例優先，⏳未審核僅供參考）。查案開頭與 recall 並行 |
+| `jira_log` | 寫入結案紀錄（單號/單型/根因/解法/修改程式）；同單重複會擋下，修正結論帶 `supersedes=舊ID`。Crisis=維運單、Story=改程式與 bug fix（changed_files 必填）。新紀錄一律 ⏳未審核 |
+
+案例人工審核（類似記憶的 REVIEW 機制，但針對案件）：新寫入的結案紀錄預設 `pending`（⏳未審核）；
+根因經人工確認後由 DBA/高權限工具在 DB 端標記 `verified`（✅，相似檢索優先引用）或
+`rejected`（結論錯誤，檢索排除、被取代的舊版自動復活）。REVIEW_* 欄位不授權 MCP 帳號，
+審核 UPDATE 範例 SQL 見 `servers/MEMORY/hrms_jira.sql` ④ 節。
 
 使用範例：
 

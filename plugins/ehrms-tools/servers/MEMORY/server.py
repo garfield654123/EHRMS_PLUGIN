@@ -76,7 +76,8 @@ async def list_tools() -> list[Tool]:
             description=(
                 "查 HRMS_JIRA 結案紀錄（每張 Jira 單的根因/解法/修改程式）。"
                 "query 給單號（EHRMSONE-XXXXX 或純數字）→ 精確查該單；"
-                "給問題敘述 → 相似案件檢索（回 top 5）。"
+                "給問題敘述 → 相似案件檢索（回 top 5，分兩層：✅已審核＝根因經"
+                "人工確認、優先參考；⏳未審核＝僅供參考，引用時須自行驗證）。"
                 "查案開頭與 recall 並行呼叫；jira_log 寫入前也先用它查重。"
             ),
             inputSchema={
@@ -98,7 +99,9 @@ async def list_tools() -> list[Tool]:
                 "在 skill 流程的報告輸出前呼叫：摘要根因、解決方式、修改程式後寫入。\n"
                 "kind 二選一：Crisis=維運單 / Story=改程式與 bug fix（changed_files 必填）。\n"
                 "同單已有紀錄會擋下並回傳既有內容；本次是修正結論時帶 supersedes=舊ID"
-                "（新筆取代舊筆）。跨單可泛化的知識請另用 remember，兩者互補。"
+                "（新筆取代舊筆）。跨單可泛化的知識請另用 remember，兩者互補。\n"
+                "新紀錄一律為 ⏳未審核；人工審核（verified/rejected）由 DB 端維護，"
+                "MCP 無權寫入審核欄。"
             ),
             inputSchema={
                 "type": "object",
