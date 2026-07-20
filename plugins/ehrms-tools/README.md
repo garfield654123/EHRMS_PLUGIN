@@ -89,6 +89,18 @@ plugins\ehrms-tools\setup.bat
 | `httpx>=0.27.0` | HTTP 非同步客戶端 |
 | `starlette>=0.27.0` | ASGI 框架 |
 
+### 步驟 2：同步 lab_UTF8（EHRMS_GIT）共用 skills
+
+本 plugin 需搭配 EHRMS 原始碼 repo（EHRMS_GIT，團隊慣稱 lab_UTF8）的專案 skills（`.claude/skills/`）一起使用。
+其中 `crisis-triage`、`mail-query`、`weekly-report` 三個 skills 以 **plugin 為準源**——
+plugin 安裝或升版後，須將 plugin 內 `skills/` 的最新版同步覆蓋到 EHRMS_GIT 的 `.claude/skills/` 對應目錄。
+
+- 交由 AI 安裝時，`/setup-guide` 的 Step 5 會自動比對並引導完成同步
+- 手動同步後請在 EHRMS_GIT 以慣例訊息 commit：`docs(skills): 同步 <skill 名> 至 ehrms-tools vX.Y.Z 版`
+
+> ⚠️ `test-report` 在兩邊同名但用途不同（EHRMS_GIT 版＝Notion 測試報告產生器，plugin 版＝測試步驟撰寫規範），
+> 不在同步清單內，切勿互相覆蓋。
+
 ---
 
 ## 取得 Jira API Token

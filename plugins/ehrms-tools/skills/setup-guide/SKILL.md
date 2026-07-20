@@ -33,8 +33,9 @@ Step 1：環境確認
 Step 2：套件安裝
 Step 3：環境變數設定
 Step 4：MCP 連線配置
-Step 5：連線測試
-Step 6：輸出總結報告
+Step 5：同步 lab_UTF8（EHRMS_GIT）共用 skills
+Step 6：連線測試
+Step 7：輸出總結報告
 ```
 
 ---
@@ -120,6 +121,30 @@ py --version
 ```
 ✅ 設定已寫入，請重新啟動 Claude Code，再執行 /setup-guide test 驗證連線。
 ```
+
+### Step 5：同步 lab_UTF8（EHRMS_GIT）共用 skills
+
+本 plugin 需搭配 EHRMS 原始碼 repo（EHRMS_GIT，團隊慣稱 lab_UTF8）的專案 skills 使用。
+下列 skills 以 plugin 為準源（source of truth），plugin 安裝或升版後需同步至該 repo 的 `.claude/skills/`：
+
+- `crisis-triage`
+- `mail-query`
+- `weekly-report`
+
+> ⚠️ `test-report` 兩邊同名但用途不同（repo 版＝Notion 測試報告產生器，plugin 版＝測試步驟撰寫規範），
+> **不在同步清單**，絕不可互相覆蓋。
+
+同步流程：
+
+1. 確認 EHRMS_GIT repo 的本機路徑：先檢查預設路徑 `C:\D\EHRMS_GIT`，不存在則詢問使用者；
+   使用者表示本機沒有此 repo → 跳過本步驟
+2. 逐一 diff 比對 plugin 的 `skills/<name>/SKILL.md` 與 `<repo>/.claude/skills/<name>/SKILL.md`
+3. 全部相同 → 回報「✅ 共用 skills 已是最新」；有差異 → 顯示 diff 摘要，經使用者確認後以 plugin 版覆蓋
+4. 覆蓋後在 EHRMS_GIT **只 stage 被同步的 skill 檔案**（該 repo 常有其他未提交修改）並 commit，
+   訊息沿用慣例：`docs(skills): 同步 <skill 名> 至 ehrms-tools vX.Y.Z 版`
+
+> 注意：EHRMS_GIT 的 `.gitignore` 含 `.claude/`，skill 檔案雖已被追蹤，
+> stage 時仍需 `git add -f .claude/skills/<name>/SKILL.md` 才不會被擋下。
 
 ---
 
