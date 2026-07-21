@@ -84,7 +84,7 @@ py --version
 - `MSSQL_SERVER` — MSSQL 伺服器 IP 或主機名稱
 - `MSSQL_DATABASE` — 資料庫名稱
 - `MSSQL_USERNAME` — 資料庫帳號
-- `MSSQL_PASSWORD` — 資料庫密碼（輸入時提醒不會顯示在歷史記錄中）
+- `MSSQL_PASSWORD` — 資料庫密碼（會寫入 `.claude.json` 與本機對話紀錄，請確認該檔案已被 `.gitignore` 排除、不會提交進版控）
 
 **JIRA MCP 所需資訊（逐一詢問使用者）：**
 
@@ -107,7 +107,7 @@ py --version
    > 4. **立即複製**產生的 Token（離開頁面後無法再查看）
    > 5. 回到這裡貼上 Token 繼續設定
 
-   Token 輸入後不會顯示在對話歷史中，請放心提供。
+   > 注意：Token 會存在 MCP 設定檔（`.claude.json`）與本機對話紀錄中，請勿在公開或共用環境輸入；設定檔請勿提交進版控。
 
 `JIRA_BASE_URL` 固定為 `https://104corp.atlassian.net`，不需詢問。
 
@@ -211,11 +211,11 @@ SELECT TOP 1 TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  DB MCP（ehrms-database）
   DB-1 服務回應     ✅ 正常
-  DB-2 資料庫連線   ✅ 正常（<DB_SERVER_IP> / <DB_NAME>）
+  DB-2 資料庫連線   ✅ 正常（<DB伺服器IP> / <資料庫名稱>）
   DB-3 基本查詢     ✅ 正常
 
  JIRA MCP（EHRMS-jira-mcp）
-  JIRA-1 認證       ✅ 正常（ziping.zhou）
+  JIRA-1 認證       ✅ 正常（你的帳號）
   JIRA-2 固定單號   ✅ 正常（EHRMSONE-27046）
   JIRA-3 自訂單號   ✅ 正常（EHRMSONE-XXXXX）
 

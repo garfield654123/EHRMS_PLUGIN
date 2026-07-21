@@ -1,6 +1,6 @@
 ---
 name: weekly-report
-description: This skill should be used when the user asks to "產出週會報告", "整理本週jira單", "幫我做週報", "generate weekly report", "週會資料整理", or wants to compile Jira tickets into a weekly meeting table. Fetches Jira tickets where Engineer = ziping.zhou for the current week and generates a structured meeting report row.
+description: This skill should be used when the user asks to "產出週會報告", "整理本週jira單", "幫我做週報", "generate weekly report", "週會資料整理", or wants to compile Jira tickets into a weekly meeting table. Fetches Jira tickets where Engineer = the current user for the current week and generates a structured meeting report row.
 version: 0.1.0
 ---
 
@@ -14,7 +14,7 @@ version: 0.1.0
 
 | 欄位 | 說明 |
 |------|------|
-| 員工 | 姓名（Ziping） |
+| 員工 | 姓名（使用者本人） |
 | 維運單（Bug/查詢/改/資料/需求/環境） | 各類型票數，由使用者確認分類 |
 | 總數(本週) | 本週 Engineer 為我的 Jira 單總數 |
 | 模組分類 | 依 Jira 標題關鍵字對應模組，格式如 `M1:7、育嬰留停:3` |
@@ -33,14 +33,14 @@ version: 0.1.0
 > 避免回傳資料量過大導致 token 超出限制。
 
 使用 Jira MCP 查詢：
-- Engineer（customfield_13907）= ziping.zhou@104.com.tw
+- Engineer（customfield_13907）= 使用者本人的 Jira Email（未特別指定時，依 CLAUDE.md 設定的預設查詢者）
 - created 範圍：**上禮拜二 ~ 本週三**（因為週會固定在週三舉行）
   - 計算方式：今天（週三）往回推 8 天 = 上禮拜二
   - 例如今天是 2026-04-15（三），start = 2026-04-07（上週二）
 - 排序：created DESC
 
 ```
-project = EHRMSONE AND "customfield_13907" = "ziping.zhou@104.com.tw" AND created >= "YYYY-MM-DD" ORDER BY created DESC
+project = EHRMSONE AND "customfield_13907" = "<你的Jira Email>" AND created >= "YYYY-MM-DD" ORDER BY created DESC
 ```
 
 > 若使用者有指定日期範圍，以使用者指定為準。
@@ -78,10 +78,10 @@ project = EHRMSONE AND "customfield_13907" = "ziping.zhou@104.com.tw" AND create
 
 ### 步驟 5：輸出報告列
 
-以 Markdown 表格輸出 Ziping 的完整報告列，方便複製貼上：
+以 Markdown 表格輸出使用者本人的完整報告列，方便複製貼上：
 
 ```
-| Ziping | {Bug} | {查詢} | {改} | {資料} | {需求} | {環境} | {AI%} | {模組分類} | {建議} | {前線需釐清} | {分享議題} | {<7天} | {>7天} | 0 | 0 |
+| {姓名} | {Bug} | {查詢} | {改} | {資料} | {需求} | {環境} | {AI%} | {模組分類} | {建議} | {前線需釐清} | {分享議題} | {<7天} | {>7天} | 0 | 0 |
 ```
 
 ## 注意事項
@@ -96,4 +96,4 @@ project = EHRMSONE AND "customfield_13907" = "ziping.zhou@104.com.tw" AND create
 
 ## 相關資源
 
-- **`references/ziping-modules.md`** - Ziping 的模組關鍵字對應規則
+- **`references/ziping-modules.md`** - 模組關鍵字對應規則範例（可依個人職務調整）

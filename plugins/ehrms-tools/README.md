@@ -167,9 +167,9 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
       "env": {
         "MCP_MODE": "stdio",
         "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/MCP_1.0",
-        "MSSQL_SERVER": "<DB_SERVER_IP>",
-        "MSSQL_DATABASE": "<DB_NAME>",
-        "MSSQL_USERNAME": "<DB_USER>",
+        "MSSQL_SERVER": "<DB伺服器IP>",
+        "MSSQL_DATABASE": "<資料庫名稱>",
+        "MSSQL_USERNAME": "<帳號>",
         "MSSQL_PASSWORD": "你的密碼"
       }
     },
@@ -193,9 +193,9 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 
 | 變數 | 必填 | 說明 | 範例值 |
 |------|------|------|--------|
-| `MSSQL_SERVER` | ✅ | MSSQL 伺服器 IP 或主機名稱 | `<DB_SERVER_IP>` |
-| `MSSQL_DATABASE` | ✅ | 資料庫名稱 | `<DB_NAME>` |
-| `MSSQL_USERNAME` | ✅ | 資料庫帳號 | `<DB_USER>` |
+| `MSSQL_SERVER` | ✅ | MSSQL 伺服器 IP 或主機名稱 | `10.0.0.1` |
+| `MSSQL_DATABASE` | ✅ | 資料庫名稱 | `your_db_name` |
+| `MSSQL_USERNAME` | ✅ | 資料庫帳號 | `your_db_user` |
 | `MSSQL_PASSWORD` | ✅ | 資料庫密碼 | `your_password` |
 | `MCP_MODE` | — | 伺服器模式 | `stdio`（預設） |
 | `MCP_SESSION_TTL` | — | Session 存活時間（秒） | `3600`（預設） |
@@ -303,7 +303,7 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 - 「幫我查 EHRMSONE-29158 的內容」
 - 「搜尋我目前指派的所有 In Progress Issue」
 - 「查 EHRMSONE-29158 的評論」
-- 「查詢 assignee 是 ziping.zhou@104.com.tw 的未完成 Issue」
+- 「查詢 assignee 是 your.name@example.com 的未完成 Issue」
 - 「幫我在 EHRMSONE-29158 加一則評論：已完成初步分析」
 
 ---
@@ -402,7 +402,7 @@ plugins/ehrms-tools/
 | 出現「允許此 MCP 執行？」提示 | 點選「允許」，這是首次連線的安全確認 |
 | `claude mcp list` 顯示空白 | 確認 `.claude.json` 中 `mcpServers` 不為空，重新啟動 Claude Code 後再試 |
 | JIRA MCP 啟動時報錯 | 確認 `JIRA_BASE_URL`、`JIRA_EMAIL`、`JIRA_API_TOKEN` 均已正確設定 |
-| DB MCP 連線逾時 | 確認 MSSQL Server IP 可連通（`ping <DB_SERVER_IP>`），並確認帳號密碼正確 |
+| DB MCP 連線逾時 | 確認 MSSQL Server IP 可連通（`ping <DB伺服器IP>`），並確認帳號密碼正確 |
 | ODBC Driver 找不到 | 安裝 [Microsoft ODBC Driver for SQL Server](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server)（建議版本 17 或 18） |
 | `py` 指令找不到 | 確認 Python 已加入 PATH，或改用 `python` 指令後回報 |
 | `/mcp-config` 指令無效 | 確認 Plugin 已正確安裝並啟用，重新載入 Claude Code |

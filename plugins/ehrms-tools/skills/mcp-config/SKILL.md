@@ -41,7 +41,7 @@ description: 管理 Claude Code MCP 伺服器設定，支援新增 JIRA MCP 與 
 【目前專案 MCP 設定】C:\D\xxx
 
 1. ehrms-database
-   指令：py C:\D\MCP\server.py  |  DB：<DB_SERVER_IP> / <DB_NAME>
+   指令：py C:\D\MCP\server.py  |  DB：<DB伺服器IP> / <資料庫名稱>
    CLI：✅ 可見  |  連線：✅ 中
 
 2. jira-mcp
@@ -96,13 +96,13 @@ description: 管理 Claude Code MCP 伺服器設定，支援新增 JIRA MCP 與 
 ```bash
 # DB MCP
 claude mcp add ehrms-database py "C:\D\MCP\server.py" \
-  --env MSSQL_SERVER=<DB_SERVER_IP> --env MSSQL_DATABASE=<DB_NAME> \
-  --env MSSQL_USERNAME=<DB_USER> --env MSSQL_PASSWORD=****
+  --env MSSQL_SERVER=<DB伺服器IP> --env MSSQL_DATABASE=<資料庫名稱> \
+  --env MSSQL_USERNAME=<帳號> --env MSSQL_PASSWORD=****
 
 # JIRA MCP
 claude mcp add jira-mcp py "-m" "jira_mcp" \
   --env JIRA_BASE_URL=https://104corp.atlassian.net \
-  --env JIRA_EMAIL=ziping.zhou@104.com.tw --env JIRA_API_TOKEN=<token> \
+  --env JIRA_EMAIL=<你的Email> --env JIRA_API_TOKEN=<token> \
   --env PYTHONPATH=C:\D\JIRA_MCP
 ```
 

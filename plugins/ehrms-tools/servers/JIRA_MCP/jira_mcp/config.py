@@ -40,12 +40,14 @@ class Config:
 
     def __init__(self):
         self.base_url = os.getenv("JIRA_BASE_URL")
-        self.email = os.getenv("JIRA_EMAIL", "ziping.zhou@104.com.tw")
+        self.email = os.getenv("JIRA_EMAIL")
         self.api_token = os.getenv("JIRA_API_TOKEN")
 
         # 驗證必要設定
         if not self.base_url:
             raise ValueError("JIRA_BASE_URL 環境變數未設定")
+        if not self.email:
+            raise ValueError("JIRA_EMAIL 環境變數未設定")
         if not self.api_token:
             raise ValueError("JIRA_API_TOKEN 環境變數未設定")
 
