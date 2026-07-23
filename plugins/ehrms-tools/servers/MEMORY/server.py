@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""EHRMS memory MCP server（stdio）——團隊共用記憶＋Jira 結案紀錄
+"""EHRMS memory MCP server（stdio）——團隊共用記憶＋Jira 結案紀錄＋人工維護參考資料
 ① recall / remember：跨單可泛化知識（HRMS_MEMORY）
 ② jira_lookup / jira_log：單一案件結案紀錄（HRMS_JIRA，一單一筆有效紀錄）
+③ faq_lookup / bulletin_lookup / task_lookup：人工維護的高精度參考資料
+   （HRMS_FAQ／HRMS_BULLETIN／HRMS_TASK，純查詢，AI 不寫入）
 """
 import asyncio
 from mcp.server import Server
@@ -11,6 +13,8 @@ from mcp.types import Tool
 
 import memory_core as mc
 import jira_core as jc
+import refdata_core as rc
+import custom_sa_core as sc
 
 server = Server("ehrms-memory")
 
@@ -123,6 +127,87 @@ async def list_tools() -> list[Tool]:
                 "required": ["jira_key", "kind", "title", "root_cause", "resolution"],
             },
         ),
+        Tool(
+            name="faq_lookup",
+            description=(
+                "查 HRMS_FAQ（人工維護的常見問題集，非 AI 產生，精度較高）。"
+                "查維運單初期與 recall／jira_lookup 並行呼叫：若問題已有現成 FAQ 解答，"
+                "可直接引用加速結案；未命中則繼續原本追碼流程。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "問題敘述（中文）"},
+                    "category": {"type": "string", "description": "限定分類（可選）"},
+                    "top_k": {"type": "integer", "description": "回傳筆數，預設 5"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="bulletin_lookup",
+            description=(
+                "查 HRMS_BULLETIN（人工維護的公告：已知問題／版本異動等，非 AI 產生）。"
+                "查維運單初期與 recall／jira_lookup／faq_lookup 並行呼叫，"
+                "已自動排除未生效／已過期的公告。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "問題敘述（中文）"},
+                    "category": {"type": "string", "description": "限定分類（可選）"},
+                    "top_k": {"type": "integer", "description": "回傳筆數，預設 5"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="task_lookup",
+            description=(
+                "查 HRMS_TASK（人工整理的 FAE 修改資料罐頭語法：SQL 範本＋參數＋風險等級＋注意事項）。"
+                "僅在診斷結論為『需要修正客戶資料』時才呼叫。回傳的 SQL 範本僅供參考，"
+                "仍須人工確認參數與實際影響範圍後才可執行——AI 不可自動執行此 SQL。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "需要修正資料的情境敘述（中文）"},
+                    "top_k": {"type": "integer", "description": "回傳筆數，預設 5"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="custom_sa_log",
+            description=(
+                "寫入/更新一筆 HRMS_CUSTOM_SA（客製分支 SA 規格文件索引，唯一寫入口）。"
+                "由 custom-sa-analyze skill 逐文件呼叫，每處理完一份文件立刻寫入。"
+                "依 (branch_name, doc_path) upsert，重跑會覆蓋同一份文件的舊結果——"
+                "一次性建檔工具，無 supersede 訂正鏈。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tax_id": {"type": "string", "description": "客戶統編（8 碼）"},
+                    "branch_name": {"type": "string", "description": "CUSTOM_GIT 分支名稱"},
+                    "doc_path": {"type": "string", "description": "SA 文件在分支內的相對路徑"},
+                    "doc_format": {"type": "string", "description": "doc/docx/pdf/xls/xlsx"},
+                    "doc_type": {"type": "string", "enum": ["spec", "confirm", "accept", "install", "other"],
+                                 "description": "依檔名關鍵字分類（可選）"},
+                    "version_label": {"type": "string", "description": "檔名擷取的版本字串，如 V2.1（可選）"},
+                    "is_latest": {"type": "boolean", "description": "同版本家族中是否為最新版（判斷不出來留空）"},
+                    "analyzed": {"type": "boolean", "description": "是否已完成步驟4深度分析"},
+                    "summary": {"type": "string", "description": "深度分析摘要（僅 analyzed=true 時填）"},
+                    "mapped_paths": {"type": "string",
+                                      "description": "對應到的程式碼路徑，一行一筆 repo 相對路徑；客製 repo 保留前綴如 CUSTOM_GIT/23019591_Skhb/…"},
+                    "mapping_status": {"type": "string", "enum": ["unmapped", "partial", "mapped"],
+                                        "description": "預設 unmapped"},
+                    "parse_issue": {"type": "string", "description": "文件格式無法解析等例外註記（可選）"},
+                    "branch_commit": {"type": "string", "description": "掃描當下的分支 commit SHA（可選）"},
+                },
+                "required": ["tax_id", "branch_name", "doc_path", "doc_format"],
+            },
+        ),
     ]
 
 
@@ -152,6 +237,28 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
             changed_files=arguments.get("changed_files", ""),
             keywords=arguments.get("keywords", ""),
             supersedes=arguments.get("supersedes", "")))
+    if name == "faq_lookup":
+        return _text(rc.lookup(
+            "faq", arguments["query"], arguments.get("category"), arguments.get("top_k", 5)))
+    if name == "bulletin_lookup":
+        return _text(rc.lookup(
+            "bulletin", arguments["query"], arguments.get("category"), arguments.get("top_k", 5)))
+    if name == "task_lookup":
+        return _text(rc.lookup(
+            "task", arguments["query"], None, arguments.get("top_k", 5)))
+    if name == "custom_sa_log":
+        return _text(sc.log_doc(
+            arguments["tax_id"], arguments["branch_name"], arguments["doc_path"],
+            arguments["doc_format"],
+            doc_type=arguments.get("doc_type"),
+            version_label=arguments.get("version_label", ""),
+            is_latest=arguments.get("is_latest"),
+            analyzed=bool(arguments.get("analyzed", False)),
+            summary=arguments.get("summary", ""),
+            mapped_paths=arguments.get("mapped_paths", ""),
+            mapping_status=arguments.get("mapping_status", "unmapped"),
+            parse_issue=arguments.get("parse_issue", ""),
+            branch_commit=arguments.get("branch_commit", "")))
     raise ValueError(f"Unknown tool: {name}")
 
 
