@@ -15,6 +15,7 @@ import memory_core as mc
 import jira_core as jc
 import refdata_core as rc
 import custom_sa_core as sc
+import custom_core as cc
 
 server = Server("ehrms-memory")
 
@@ -208,6 +209,34 @@ async def list_tools() -> list[Tool]:
                 "required": ["tax_id", "branch_name", "doc_path", "doc_format"],
             },
         ),
+        Tool(
+            name="custom_log",
+            description=(
+                "寫入/更新一筆 HRMS_CUSTOM（客製分支檔案層級深度分析，唯一寫入口）。"
+                "由兩階段掃描 skill 對候選客製檔案深讀＋跟標準版比對後呼叫，每處理完一個"
+                "檔案立刻寫入。依 (branch_name, custom_path) upsert，重跑會覆蓋同一檔案的"
+                "舊結果——一次性建檔工具，無 supersede 訂正鏈。\n"
+                "sa_doc_path 有給值時，會同步回填 HRMS_CUSTOM_SA 該筆文件的 mapped_paths"
+                "（雙向關聯；找不到對應文件時回填會失敗但不影響本次寫入）。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "company_sno": {"type": "string", "description": "客戶統編（8 碼）"},
+                    "branch_name": {"type": "string", "description": "CUSTOM_GIT 分支名稱"},
+                    "custom_path": {"type": "string", "description": "客製版檔案路徑（repo 相對，CUSTOM_GIT 內）"},
+                    "custom_type": {"type": "string", "enum": ["standard", "pure", "version_lag"],
+                                     "description": "standard=標準客製(有標準版對應且邏輯不同) / pure=純客製(該客戶專屬，通常在plugin目錄) / version_lag=非真客製，只是標準版舊拷貝"},
+                    "std_baseline": {"type": "string", "description": "本次比對用的標準版分支，如 '202607_000'（每半年更新，必填）"},
+                    "standard_path": {"type": "string", "description": "標準版對應路徑（repo 相對）；純客製無標準對應可留空"},
+                    "description": {"type": "string", "description": "詳細記錄客製了什麼邏輯；version_lag 可留空或記落後說明"},
+                    "sa_doc_path": {"type": "string", "description": "對應 HRMS_CUSTOM_SA.DOC_PATH（找到規格書時填，會回填該文件的 mapped_paths；找不到留空）"},
+                    "source": {"type": "string", "description": "產生途徑，預設 'deep_scan'（可選）"},
+                    "branch_commit": {"type": "string", "description": "掃描當下的分支 commit SHA（可選）"},
+                },
+                "required": ["company_sno", "branch_name", "custom_path", "custom_type", "std_baseline"],
+            },
+        ),
     ]
 
 
@@ -258,6 +287,15 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
             mapped_paths=arguments.get("mapped_paths", ""),
             mapping_status=arguments.get("mapping_status", "unmapped"),
             parse_issue=arguments.get("parse_issue", ""),
+            branch_commit=arguments.get("branch_commit", "")))
+    if name == "custom_log":
+        return _text(cc.log_file(
+            arguments["company_sno"], arguments["branch_name"], arguments["custom_path"],
+            arguments["custom_type"], arguments["std_baseline"],
+            standard_path=arguments.get("standard_path", ""),
+            description=arguments.get("description", ""),
+            sa_doc_path=arguments.get("sa_doc_path", ""),
+            source=arguments.get("source", "deep_scan"),
             branch_commit=arguments.get("branch_commit", "")))
     raise ValueError(f"Unknown tool: {name}")
 
