@@ -1,6 +1,6 @@
 ---
 name: custom-sa-analyze
-description: 深度解析單一客製分支的 SA 規格文件，摘要客製邏輯並與實際程式碼交叉驗證，寫入 HRMS_CUSTOM_SA。由 headless 批次呼叫，非互動使用；一次只處理一個指定分支（分支名稱由呼叫端 prompt 指定）。備份版本——正本在 CUSTOM_GIT/.claude/skills/custom-sa-analyze（該 repo 無穩定分支可版控，這裡是唯一有 git 歷史的副本）。
+description: 深度解析單一客製分支的 SA 規格文件，摘要客製邏輯並與實際程式碼交叉驗證，寫入 HRMS_CUSTOM_SA。由 headless 批次呼叫，非互動使用；一次只處理一個指定分支（分支名稱由呼叫端 prompt 指定）。備份版本——正本在 CUSTOM_GIT/.claude/skills/custom-sa-analyze（該 repo 無穩定分支可版控，這裡是唯一有 git 歷史的副本）。轉檔輔助腳本 doc_to_pdf.py 備份在同目錄 scripts/。
 ---
 
 # 客製 SA 規格深度分析
@@ -40,7 +40,12 @@ description: 深度解析單一客製分支的 SA 規格文件，摘要客製邏
 
 對每份需深度分析的規格書：
 
-1. 用 Read 工具讀取內容（含內嵌圖片/截圖）。**`.doc` 舊版二進位格式若 Read 工具無法解析**，不要跳過不記錄——寫入 `parse_issue="格式無法解析，需人工開啟"`，`analyzed=0`
+1. **Read 工具無法直接讀取 Word/Excel 格式**（`.doc`/`.docx`/`.xls`/`.xlsx` 皆然，不是只有舊版 `.doc`）。讀取前先用 PowerShell（不要用 Git Bash／MSYS，中文路徑 argv 會被錯誤解碼導致「找不到檔案」）呼叫轉檔工具，轉成 PDF 後再用 Read 工具讀：
+   ```powershell
+   py C:\D\CUSTOM_GIT\.claude\scripts\doc_to_pdf.py "<文件完整路徑>"
+   ```
+   成功會印出轉檔後的 PDF 路徑（在系統暫存目錄，不影響原始檔案），用 Read 工具讀那個路徑。
+   若轉檔失敗（例如檔案損毀、COM 元件無法啟動），不要跳過不記錄——寫入 `parse_issue="轉檔失敗：<錯誤訊息>"`，`analyzed=0`
 2. 摘要：這份規格在講哪個功能、客製了什麼邏輯，寫給後續查案的人看（完整敘述，不是給機器解析用的結構化片段）
 3. 從摘要內容找線索（客戶代號、功能關鍵字、提到的欄位/表格名稱）
 4. 到分支的程式碼裡搜尋比對：Grep 客製 ProgID／`ZZ_` 前綴／功能關鍵字，找出實際實作這段邏輯的檔案
@@ -70,7 +75,13 @@ custom_sa_log(
 
 ## 步驟 7：回報
 
-輸出簡短摘要（處理幾份文件、幾份深度分析、幾份 mapped/partial/unmapped、有無無法解析的格式），供 orchestrator 判斷這個分支是否算完成。
+輸出簡短摘要，**明確區分「嘗試深度分析」跟「實際成功分析」**，不要把兩者混著講（例如不要寫「深度分析了 X 份規格書」卻沒說清楚其中有幾份其實 `parse_issue` 卡住、`analyzed` 仍是 0——回報文字要跟 DB 裡的實際狀態一致，不能報喜不報憂）：
+- 處理文件總數、骨架分類數
+- 嘗試深度分析數 vs 實際成功（`analyzed=1`）數
+- 成功的部分：mapped/partial/unmapped 各幾份
+- 失敗的部分：`parse_issue` 各是什麼原因、幾份
+
+供 orchestrator 判斷這個分支是否算完成。
 
 ## 注意事項
 
