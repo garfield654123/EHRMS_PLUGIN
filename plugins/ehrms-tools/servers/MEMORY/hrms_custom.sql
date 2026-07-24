@@ -11,10 +11,13 @@
      階段1（便宜、全面）：ZZ_ 前綴／非標準 ProgID 規則，篩出候選客製檔案清單
      階段2（貴、深入）：對候選檔案深讀＋跟標準版（STD_BASELINE 分支）語意比對，
        判定 CUSTOM_TYPE、寫詳細 DESCRIPTION，並嘗試比對 HRMS_CUSTOM_SA 找對應規格書
-   - CUSTOM_TYPE 三分類（比照 custom_compare 第1層判讀，多一種 version_lag）：
-       standard    = 標準客製（有標準版對應，邏輯確實不同）
-       pure        = 純客製（該客戶專屬功能，通常在 plugin 目錄下，無標準版對應；有少數例外）
-       version_lag = 非真客製，只是標準版舊拷貝、版本落後（假陽性，篩選候選時常見）
+   - CUSTOM_TYPE 四分類（比照 custom_compare 第1層判讀 standard/pure，另加兩種假陽性）：
+       standard     = 標準客製（有標準版對應，邏輯確實不同）
+       pure         = 純客製（該客戶專屬功能，通常在 plugin 目錄下，無標準版對應；有少數例外）
+       version_lag  = 非真客製，只是標準版舊拷貝、版本落後（曾走過客製/複製流程但沒跟上更新）
+       std_attached = 標準附屬，純粹是標準檔案，為了讓客製元件能編譯而存在（依賴檔），
+                      完全不在客製範圍內（例如整個模組資料夾被複製出去獨立編譯時，
+                      裡面沒被改過的共用工具檔案）
    - STD_BASELINE：本次比對用的標準版分支（EHRMS_GIT，如 '202607_000'）。
      ⚠️ 此基準每半年會更新一次，寫在資料列而非寫死在程式邏輯裡，
      半年後換版，舊資料仍可追溯是用哪個基準比對出來的，需要時才重掃。
@@ -49,8 +52,8 @@ CREATE TABLE dbo.HRMS_CUSTOM (
 
     -- ── 分類與詳細內容 ───────────────────────────────────
     CUSTOM_TYPE     VARCHAR(20)    NOT NULL
-        CONSTRAINT CK_HRMSCUSTOM_TYPE CHECK (CUSTOM_TYPE IN ('standard','pure','version_lag')),
-    DESCRIPTION     NVARCHAR(MAX)  NULL,       -- 詳細記錄客製了什麼邏輯；version_lag 可留空或記落後說明
+        CONSTRAINT CK_HRMSCUSTOM_TYPE CHECK (CUSTOM_TYPE IN ('standard','pure','version_lag','std_attached')),
+    DESCRIPTION     NVARCHAR(MAX)  NULL,       -- 詳細記錄客製了什麼邏輯；version_lag/std_attached 可留空或記說明
 
     -- ── 與 SA 規格書的關聯（增補，非必要來源）───────────────
     SA_DOC_PATH     NVARCHAR(500)  NULL,       -- 對應 HRMS_CUSTOM_SA.DOC_PATH；找不到留空

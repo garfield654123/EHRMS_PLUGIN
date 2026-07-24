@@ -10,7 +10,7 @@ import custom_sa_db as sa_db
 import memory_db as mdb
 import pathnorm
 
-CUSTOM_TYPES = ("standard", "pure", "version_lag")
+CUSTOM_TYPES = ("standard", "pure", "version_lag", "std_attached")
 
 
 def log_file(company_sno, branch_name, custom_path, custom_type, std_baseline,

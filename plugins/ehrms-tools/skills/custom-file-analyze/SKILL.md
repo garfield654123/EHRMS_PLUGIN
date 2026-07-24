@@ -1,6 +1,6 @@
 ---
 name: custom-file-analyze
-description: 兩階段深度掃描單一客製分支的所有客製檔案（不依賴 SA 規格書），判定標準客製/純客製/版本落後，詳細記錄客製了什麼邏輯，並嘗試比對 HRMS_CUSTOM_SA 找對應規格書。寫入 HRMS_CUSTOM。由 headless 批次呼叫，非互動使用；一次只處理一個指定分支。備份版本——正本在 CUSTOM_GIT/.claude/skills/custom-file-analyze（該 repo 無穩定分支可版控，這裡是唯一有 git 歷史的副本）。
+description: 兩階段深度掃描單一客製分支的所有客製檔案（不依賴 SA 規格書），判定標準客製/純客製/版本落後/標準附屬，詳細記錄客製了什麼邏輯，並嘗試比對 HRMS_CUSTOM_SA 找對應規格書。寫入 HRMS_CUSTOM。由 headless 批次呼叫，非互動使用；一次只處理一個指定分支。備份版本——正本在 CUSTOM_GIT/.claude/skills/custom-file-analyze（該 repo 無穩定分支可版控，這裡是唯一有 git 歷史的副本）。
 ---
 
 # 客製檔案深度分析（兩階段掃描）
@@ -39,12 +39,14 @@ description: 兩階段深度掃描單一客製分支的所有客製檔案（不�
 
 1. **判斷 STANDARD_PATH**：依 `custom-compare/SKILL.md` 的路徑對應規則（`eHRMS/VB/` ↔ `/VB/EHRMS/`、`eHRMS/Webpage/` ↔ `/EHRMS/`，排除 `eHRMS/Webpage/plugin/`）推算標準版對應路徑；推不出來或標準版無此檔（純客製常見於 Plugin 目錄）→ `STANDARD_PATH` 留空
 2. **Word/Excel 格式無關**（本步驟只讀程式碼，不會遇到 Read 工具讀不了的問題）
-3. **有 STANDARD_PATH**：讀客製版 + 讀 `EHRMS_GIT` 於 `STD_BASELINE` 分支的對應檔案，語意比對差異（不是純文字 diff，客製版常見格式/欄位順序跑掉）：
-   - 差異只是版面/編碼/純格式，或客製版只是缺了標準版後續 bug fix、看不出真正客製意圖 → `CUSTOM_TYPE=version_lag`
+3. **有 STANDARD_PATH**：讀客製版 + 讀 `EHRMS_GIT` 於 `STD_BASELINE` 分支的對應檔案，語意比對差異。**⚠️ 一律用 Read 工具讀取比對內容，不要用 shell `diff` 直接比對檔案**——`.cls`/`.bas`/`.asp` 通常是 Big5 編碼，shell `diff` 有時會把高位元組誤判成二進位檔而中途放棄比對（實測過，`modCommon.bas` 就踩到這個坑，比對可能不完整卻不會報錯，容易誤判）。不是純文字 diff，客製版常見格式/欄位順序跑掉，要看語意：
    - 差異確實是刻意的客戶邏輯調整（新增條件判斷、改變計算方式、新增欄位等） → `CUSTOM_TYPE=standard`
+   - 檔案幾乎整份跟標準版一致，只是缺了標準版後續才加的功能/修正（看得出「曾經一致、後來沒跟上」的痕跡，例如標準版有明確的 `modify by XXX for [單號]` 註解而客製版沒有），且**找不到任何客製版獨有的邏輯** → `CUSTOM_TYPE=version_lag`
+   - 判斷不出是「曾經客製過但沒跟上」還是「單純陪著模組資料夾一起被複製、從未被改過」時，優先看是否有 `>`（客製版獨有）內容：完全沒有客製版獨有內容 → 傾向 `std_attached`；不確定就用 `version_lag`（較保守的標籤，不代表「保證沒客製過」）
 4. **無 STANDARD_PATH**（含 Plugin 目錄下的獨立元件、找不到標準對應）→ `CUSTOM_TYPE=pure`
-5. **寫 DESCRIPTION**（詳細，比照 custom-sa-analyze 步驟4.2 的摘要規範——具體寫客製了什麼邏輯、差異在哪，不要籠統帶過；`version_lag` 可簡短或留空）
-6. **嘗試比對 HRMS_CUSTOM_SA**：用 DB MCP 查 `SELECT DOC_PATH, SUMMARY, MAPPED_PATHS FROM dbo.HRMS_CUSTOM_SA WHERE BRANCH_NAME='<分支>'`，看有沒有文件的 `SUMMARY`／既有 `MAPPED_PATHS` 內容跟這個檔案的客製邏輯對得上（關鍵字、功能描述比對，不是機械式字串比對）。找到 → 記 `sa_doc_path`；找不到 → 留空，不強湊
+5. **`std_attached`（標準附屬）判斷**：這個分類是給「整個模組資料夾被複製出去獨立編譯（例如 `RC_Personnel` 是 `Personnel` 模組整包複製），資料夾裡有些檔案真的被改過，但也有些檔案只是陪著一起複製、從未被改過、純粹是為了讓元件能編譯而存在」這種情況。判斷依據：跟標準版比對後**完全沒有任何客製版獨有的內容**（不是「缺東西」，是「一行客製邏輯都沒有」），可以合理推測是誤上/陪同複製，不是真的客製意圖 → `CUSTOM_TYPE=std_attached`。跟 `version_lag` 的差別：`version_lag` 隱含「這裡曾經走過客製流程但沒跟上」，`std_attached` 隱含「這裡從來就不打算客製，只是編譯需要」——實務上兩者有時很難精確分辨，判斷不確定時兩者皆可接受，不用強求完美區分
+6. **寫 DESCRIPTION**（詳細，比照 custom-sa-analyze 步驟4.2 的摘要規範——具體寫客製了什麼邏輯、差異在哪，不要籠統帶過；`version_lag`/`std_attached` 可簡短或留空，但建議簡短註明判斷依據，如「僅缺標準版 EHRMSONE-25105 後續修正，無客製版獨有邏輯」）
+7. **嘗試比對 HRMS_CUSTOM_SA**：用 DB MCP 查 `SELECT DOC_PATH, SUMMARY, MAPPED_PATHS FROM dbo.HRMS_CUSTOM_SA WHERE BRANCH_NAME='<分支>'`，看有沒有文件的 `SUMMARY`／既有 `MAPPED_PATHS` 內容跟這個檔案的客製邏輯對得上（關鍵字、功能描述比對，不是機械式字串比對）。找到 → 記 `sa_doc_path`；找不到 → 留空，不強湊
 
 ## 步驟 4：寫入資料庫
 
@@ -70,7 +72,7 @@ custom_log(
 **明確區分「候選數」「嘗試深讀數」「實際成功寫入數」**，不要混著講：
 - 階段一候選檔案總數
 - 階段二嘗試深讀數 vs 實際成功寫入（`custom_log` 回傳成功）數
-- 依 `CUSTOM_TYPE` 分類統計：standard / pure / version_lag 各幾個
+- 依 `CUSTOM_TYPE` 分類統計：standard / pure / version_lag / std_attached 各幾個
 - 找到 SA 對應文件並成功回填的有幾個
 - 失敗/略過的檔案跟原因
 
