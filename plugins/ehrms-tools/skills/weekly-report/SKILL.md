@@ -33,14 +33,20 @@ version: 0.1.0
 > 避免回傳資料量過大導致 token 超出限制。
 
 使用 Jira MCP 查詢：
-- Engineer（customfield_13907）= 使用者本人的 Jira Email（未特別指定時，依 CLAUDE.md 設定的預設查詢者）
+- **狀態為 To Do（待辦事項）的單**：篩選條件用 `assignee`，不要用 Engineer 欄位。
+  - 原因：To Do 單常常 Engineer 欄位還沒填（例如客戶剛回報、尚未指派負責人時 Engineer 為空），但 assignee 已經指向目前的承辦人，用 Engineer 篩會漏單（實例：EHRMSONE-33768，Engineer 為 null 但 assignee 已是本人）。
+- **其他狀態的單**（非 To Do）：篩選條件用 Engineer（customfield_13907）= 使用者本人的 Jira Email（未特別指定時，依 CLAUDE.md 設定的預設查詢者）。
 - created 範圍：**上禮拜二 ~ 本週三**（因為週會固定在週三舉行）
   - 計算方式：今天（週三）往回推 8 天 = 上禮拜二
   - 例如今天是 2026-04-15（三），start = 2026-04-07（上週二）
 - 排序：created DESC
 
 ```
-project = EHRMSONE AND "customfield_13907" = "<你的Jira Email>" AND created >= "YYYY-MM-DD" ORDER BY created DESC
+project = EHRMSONE AND (
+  (status = "To Do" AND assignee = "<你的Jira Email>")
+  OR
+  (status != "To Do" AND "customfield_13907" = "<你的Jira Email>")
+) AND created >= "YYYY-MM-DD" ORDER BY created DESC
 ```
 
 > 若使用者有指定日期範圍，以使用者指定為準。
