@@ -164,6 +164,7 @@ project = EHRMSONE AND status = "SA Testing" AND assignee = "ziping.zhou@104.com
         - 員工作答與結果：`PORTALP_EMPLOYEE_PLAN`（員工的規劃）、`PORTALP_EMPLOYEE_PLAN_STEP`（階段／STEP_STATUS）、`PORTALP_FORM_ANSWER`（作答）、`PORTALP_FORM_SUB_SCORE`／`PORTALP_FORM_TOTAL_SCORE`（分數）。
         - 其他：`HRMSP_RESULT_ALLOT*`（結果分配）、`HRMSP_JUDGMENT*`（評等）、`HRMSP_EXTRA_*`（額外目標／欄位）、`HRMSP_WORK_TALENT_*`（工作／人才）。
       - 以 `ZZ_` 開頭的是客製表，只屬特定客戶，不納入標準測試資料。
+      - **代碼值不是表名／欄位名**：績效表單的欄位以代碼值定義（例如 `TA001`＝項次、`TA007`＝權重），代碼存在 `HRMSP_EXTRA_COLUMN.EXTRA_COLUMN_CODE`，作答存在 `PORTALP_FORM_ANSWER.COLUMN_CODE`；頁面欄位名稱形如 `sub{代碼}_{列}_{欄}`。在程式或頁面看到 `TAxxx` 這類代碼時，要查這兩處的**欄位值**，不可去找名為 TAxxx 的表或欄位，更不可因此下結論「測試機沒有資料」。
    4. 找到候選表後，仍須先以 `get_table_columns` 驗證欄位，並以 `COUNT(*)` 確認測試機有資料再設計篩選條件。
 3. 留言中列出：員工編號、公司別、姓名、為何適合（關鍵特徵）。
 4. **找不到符合的資料**：只說明「測試機找不到」並列出需要哪些條件，**不提供建立資料的步驟或 INSERT／UPDATE 草稿**。
