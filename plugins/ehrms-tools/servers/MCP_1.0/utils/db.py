@@ -8,6 +8,18 @@ from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
 from threading import Lock
 
+_NETWORK_SQLSTATES = {"08001", "08004", "08S01", "HYT00"}
+
+
+def _friendly_connect_error(e: pyodbc.Error) -> Exception:
+    """離線／連不到內部 DB 時的可讀錯誤；帳密錯誤等其他 SQLSTATE 原樣拋出，不誤導成網路問題。"""
+    sqlstate = e.args[0] if e.args else ""
+    if sqlstate in _NETWORK_SQLSTATES:
+        return RuntimeError(
+            "無法連線到 EHRMS 內部資料庫（可能目前不在公司網路／VPN 環境），"
+            f"請確認網路連線後再試。（原始錯誤：{e}）")
+    return e
+
 
 class DatabaseConnectionPool:
     """簡單的資料庫連線池，重用連線以提升效能"""
@@ -57,7 +69,10 @@ class DatabaseConnectionPool:
     def _create_connection(self, server: str, database: str, username: str, password: str) -> pyodbc.Connection:
         """建立新的資料庫連線"""
         connection_string = self._get_connection_string(server, database, username, password)
-        return pyodbc.connect(connection_string)
+        try:
+            return pyodbc.connect(connection_string, timeout=5)
+        except pyodbc.Error as e:
+            raise _friendly_connect_error(e) from e
     
     def get_connection(
         self, 

@@ -3,6 +3,8 @@ name: custom-file-analyze
 description: 兩階段深度掃描單一客製分支的所有客製檔案（不依賴 SA 規格書），判定標準客製/純客製/版本落後/標準附屬，詳細記錄客製了什麼邏輯，並嘗試比對 HRMS_CUSTOM_SA 找對應規格書。寫入 HRMS_CUSTOM。由 headless 批次呼叫，非互動使用；一次只處理一個指定分支。備份版本——正本在 CUSTOM_GIT/.claude/skills/custom-file-analyze（該 repo 無穩定分支可版控，這裡是唯一有 git 歷史的副本）。
 ---
 
+執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
+
 # 客製檔案深度分析（兩階段掃描）
 
 輸入：一個 CUSTOM_GIT 分支名稱（由呼叫端 prompt 指定，不主動詢問使用者——這是 headless 批次流程，無人在場確認）。

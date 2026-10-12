@@ -1,6 +1,7 @@
 @echo off
 echo ===== EHRMS Tools Plugin - 安裝 Python 依賴 =====
-pip install -r "%~dp0requirements.txt"
+py -3 -m pip install -r "%~dp0requirements.txt"
+if errorlevel 1 exit /b 1
 echo.
-echo 完成！請重新啟動 Claude Code 讓 MCP 生效。
+echo Dependencies installed. Restart Claude Code or Codex after configuring the plugin.
 pause

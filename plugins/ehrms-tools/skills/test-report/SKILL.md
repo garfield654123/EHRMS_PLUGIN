@@ -1,7 +1,9 @@
 ---
 name: test-report
-description: EHRMS Bug Fix 測試步驟撰寫規範，包含測試資料查找、步驟格式、預期結果描述及影響範圍驗證。Use when writing test steps for bug fix verification after code changes are deployed to lab.
+description: EHRMS Bug Fix 測試步驟撰寫規範，包含測試資料查找、步驟格式、預期結果描述及影響範圍驗證；亦含共用元件（SP/Class）修改的「改A壞B」風險驗證方法。Use when writing test steps for bug fix verification after code changes are deployed to lab, or when assessing whether a shared stored procedure/class modification could break other callers.
 ---
+
+執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
 
 # EHRMS 測試步驟撰寫規範
 
@@ -195,3 +197,26 @@ Step 4：觀察 [驗證點]
 | 日期格式異常 | 日期顯示格式 | 找有 CHANGE_ENDDATE / EVENT_DATE 的假單 |
 | 銷假假別錯誤 | 銷假欄假別名稱 | 找有跨日假單且同日有另一假別並有銷假的員工 |
 | 空白欄位 | 特定欄位是否有值 | 直接查目標欄位為 NULL 或 1900/1/1 的資料 |
+
+---
+
+## H. 共用元件（SP／Class）修改的「改A壞B」風險驗證方法
+
+**適用：** 修改被多個模組共用的 Stored Procedure 或共用 Class（例如 `GetEmpRollBack_all`、`clsReportBuilder` 等），部署前需評估是否會影響其他呼叫端。
+
+**流程：**
+```
+列出所有呼叫端 → 列出所有欄位使用端 → 交集比對 → 逐一核對用途語意
+→ 查DB schema驗證型別假設 → fallback值安全性查證 → 風險分層 → 部署前備份現行版本
+```
+
+1. **列出所有呼叫端**：`Grep` 全 repo 搜尋 SP 名稱／函式名稱（`output_mode: files_with_matches`），統計共用範圍涵蓋幾個檔案、屬於哪些功能模組。
+2. **列出欄位使用端**：對本次新增／修改的欄位名稱另外 Grep 一次，找出「誰在讀這個欄位」。
+3. **交集比對**：呼叫端 ∩ 欄位使用端＝真正需要逐一核對的消費者；其餘檔案只是呼叫 SP 拿其他欄位，理論上不受影響（仍建議部署後抽測風險最高的 1-2 個，見步驟 7）。
+4. **核對用途語意**：交集內每個消費者，確認該欄位用途是否與本次修改語意一致（例如都只是「JOIN 對照表取名稱」）。若發現有消費者把欄位挪作他用（例如當日期運算、當其他業務判斷依據），視為高風險，須額外確認後才能繼續。
+5. **DB schema 驗證假設**：修改理由中若包含「這個欄位其實是 XX 型別」之類的假設（尤其是欄名與實際型別不符的歷史遺留設計，如欄名含 `DATE` 但實際存 int），務必用 `get_table_columns`／`mssql_query` 查 `sys.columns` 實際驗證，不能只憑欄位名稱或程式碼註解推測。
+6. **Fallback 值安全性**：若修改引入 fallback（如查無資料補 0／NULL），要查詢目標對照表是否已存在會被誤判為「有效值」的資料（例如補 0 前，查對照表有無 `ID<=0` 的合法資料，避免補 0 後意外顯示成某個真實值）。
+7. **風險分層**：把呼叫端分成「唯一消費且已核對安全」／「無關但共用、部署後抽測」兩層，寫進測試報告的影響範圍段落，並列出建議抽測的檔案（優先挑風險最高、影響金額或法遵計算的模組，如薪資試算）。
+8. **部署前備份**：用 `OBJECT_DEFINITION(OBJECT_ID('SP名稱'))` 查詢目前部署版本的完整定義，存成 `<SP名稱>_Backup_<日期>.SQL`（DROP+CREATE 可重複執行格式）放在對應的 `script/StoredProcedure` 資料夾，作為快速回退依據。
+
+**範例（EHRMSONE-33067）：** `GetEmpRollBack_all` 被 27 個檔案呼叫，本次新增三個「起任原因」欄位；Grep 交叉比對後只有 3 個檔案（`clsPerData_Exp.cls` ×2、`clsReportBuilder.cls`）真正讀取這些欄位，且用途皆為 `LEFT JOIN HRMS_ALTERATION_CAUSE` 查原因名稱，無另作他用情形，判定風險低；仍建議部署後抽測薪資試算類（`clsPAYSalaryCacul.cls`）確認無異常。

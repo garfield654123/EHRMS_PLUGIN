@@ -35,6 +35,19 @@ def created_by():
     return os.getenv("USERNAME") or os.getenv("USER") or "unknown"
 
 
+_NETWORK_SQLSTATES = {"08001", "08004", "08S01", "HYT00"}
+
+
+def _friendly_connect_error(e):
+    """離線／連不到內部 DB 時的可讀錯誤；帳密錯誤等其他 SQLSTATE 原樣拋出，不誤導成網路問題。"""
+    sqlstate = e.args[0] if e.args else ""
+    if sqlstate in _NETWORK_SQLSTATES:
+        return RuntimeError(
+            "無法連線到 EHRMS 內部資料庫（可能目前不在公司網路／VPN 環境），"
+            f"請確認網路連線後再試。（原始錯誤：{e}）")
+    return e
+
+
 def _get_conn():
     global _conn
     import pyodbc
@@ -58,14 +71,17 @@ def _get_conn():
     available = pyodbc.drivers()
     driver = next((d for d in preferred if d in available),
                   next((d for d in available if "SQL Server" in d), preferred[0]))
-    _conn = pyodbc.connect(
-        f"DRIVER={{{driver}}};"
-        f"SERVER={os.getenv('MSSQL_SERVER')};"
-        f"DATABASE={os.getenv('MSSQL_DATABASE')};"
-        f"UID={os.getenv('MSSQL_USERNAME')};"
-        f"PWD={os.getenv('MSSQL_PASSWORD')};"
-        f"TrustServerCertificate=yes;",
-        timeout=5)
+    try:
+        _conn = pyodbc.connect(
+            f"DRIVER={{{driver}}};"
+            f"SERVER={os.getenv('MSSQL_SERVER')};"
+            f"DATABASE={os.getenv('MSSQL_DATABASE')};"
+            f"UID={os.getenv('MSSQL_USERNAME')};"
+            f"PWD={os.getenv('MSSQL_PASSWORD')};"
+            f"TrustServerCertificate=yes;",
+            timeout=5)
+    except pyodbc.Error as e:
+        raise _friendly_connect_error(e) from e
     _conn.autocommit = True
     return _conn
 

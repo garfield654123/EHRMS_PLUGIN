@@ -2,6 +2,64 @@
 
 EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**ehrms-memory 團隊共用記憶** 及 **MCP 設定管理 Skill**。
 
+## v3.9.0：Claude Code 與 Codex 共用
+
+支援 Windows 上的 Claude Code 與具本機執行能力的 Codex（GPT）。
+三個 MCP、27 個工具及 10 個技能共用同一份程式。純網頁 ChatGPT 不會直接執行本機 Python；
+本版本未將公司資料庫或 MCP 發布至公網。
+
+### 安裝
+
+1. 執行本目錄 setup.bat，使用 py -3 -m pip 安裝依賴。
+2. 將 config.env.example 複製到使用者家目錄的 .ehrms-tools/.env，於本機填入設定。
+   若檔案已存在，合併需要的欄位，不覆蓋。也可設定 EHRMS_ENV_FILE 指向既有檔案。
+3. Claude：沿用 repo 的 .claude-plugin/marketplace.json 安裝 ehrms-tools@ehrms-local。
+4. Codex：執行下列指令註冊 repo 來源，再於支援插件的桌面介面選擇 EHRMS Local，
+   安裝及啟用 ehrms-tools，重新開啟對話：
+
+```powershell
+codex plugin marketplace add "C:\D\EHRMS_PLUGIN"
+```
+
+此路徑是本機範例，若 clone 到別處請替換。CLI 單獨安裝 MCP 與 skills 的方式見
+[平台設定](skills/mcp-config/references/platforms.md)。已安裝插件者勿再次手動註冊同一組 MCP。
+
+### 封裝與憑證
+
+| 檔案 | 用途 |
+|---|---|
+| .claude-plugin/plugin.json | Claude manifest |
+| mcp.claude.json | Claude MCP 啟動設定，覆蓋預設 .mcp.json 的同名服務 |
+| .codex-plugin/plugin.json | Codex manifest，載入共用 skills/ 與 .mcp.json |
+| .mcp.json | Codex MCP 設定，cwd 相對插件根目錄 |
+| scripts/run_mcp.py | 三個 MCP 共用 stdio 入口 |
+| repo 的 .agents/plugins/marketplace.json | Codex repo marketplace |
+
+啟動器依序使用：有效程序環境變數 → 共用 dotenv 檔 → 舊版 .claude/settings.json 的 env。
+只讀取所選服務需要的欄位，不輸出秘密；dotenv 不展開字串內的變數。
+Jira 使用 JIRA_BASE_URL／JIRA_EMAIL／JIRA_API_TOKEN；Database 與 Memory 使用四個 MSSQL_*。
+Memory 可另帶 JIRA_EMAIL／MEMORY_USER。三個服務直接啟動 main_stdio，stdout 保留給 MCP 協定。
+既有 servers/JIRA_MCP/launch_codex.py 仍可用，但新版插件統一走共用入口。
+
+### 離線驗證
+
+```powershell
+py -3 -B -m unittest discover -s plugins/ehrms-tools/tests -v
+```
+
+從 repo 根目錄執行。測試使用假憑證，實際啟動 MCP、握手及列舉工具，
+不查詢公司 DB、不呼叫 Jira API、不寫入團隊記憶。
+這不能取代安裝後的帳號、網路、ODBC 與 UI 技能載入驗證。
+
+### 共用技能
+
+crisis-triage、mail-query、weekly-report、test-report、package-files、memory-curate、
+custom-file-analyze、custom-sa-analyze、mcp-config、setup-guide。
+兩個 custom 分析流程仍需 CUSTOM_GIT 與既有 SQL 資料表；Office 轉 PDF 另需本機 Office／pywin32。
+
+以下為既有功能說明；舊的 Claude 手動安裝範例僅供歷史參考，
+v3.9.0 安裝與設定以本節和平台設定文件為準。
+
 ---
 
 ## v3.0.0：移除 codegraph 程式圖譜

@@ -3,6 +3,8 @@ name: mail-query
 description: This skill should be used when the user asks to "查某個通知信的寄發邏輯", "找寄信程式碼在哪", "這個通知信怎麼寄的", "查排程通知設定", "為什麼這封信沒寄出", "某功能的寄信流程", "找通知信的程式碼位置". Use when locating EHRMS AutoEngine mail notification code or tracing mail sending flow.
 ---
 
+執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
+
 # EHRMS 寄信功能定位
 
 EHRMS 的通知信由 **AutoEngine 排程** 驅動，主程式在 `ClsAutorun_A.cls`。定位某種通知的寄信邏輯時，以 DB 查到的 `NOTIFY_DESCRIPTION`（中文名稱）或 `NOTIFY_REFERENCE_CODE`（如 SNR01）直接在程式碼中搜尋。

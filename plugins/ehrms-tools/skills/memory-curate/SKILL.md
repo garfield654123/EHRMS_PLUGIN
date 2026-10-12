@@ -3,6 +3,8 @@ name: memory-curate
 description: 定期對團隊共用記憶表 HRMS_MEMORY 去蕪存菁：合併重複、訂正矛盾、淘汰過時與從未被引用的記憶。全程 append-only（用 supersede 表達取代，絕不 DELETE）。Use when the user asks to 整理記憶、清理記憶、記憶去蕪存菁、記憶維護、curate memory、檢視記憶品質.
 ---
 
+執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
+
 # 記憶去蕪存菁（memory-curate）
 
 對 `HRMS_MEMORY` 做定期品質維護。**讀**用 ehrms-database 的 `mssql_query`（可看全表含被取代/rejected），**寫**一律用 ehrms-memory 的 `remember`（supersede 機制），**絕對不下 UPDATE/DELETE 改記憶內容**——內容修改權不屬於 MCP 帳號，物理刪除與 rejected 標記只能由 DBA 執行。

@@ -1,0 +1,17 @@
+{
+  "name": "ehrms-tools",
+  "version": "3.9.0",
+  "description": "EHRMS 開發工具包：Jira、唯讀資料庫查詢、團隊記憶與共用工作流程。",
+  "author": {"name": "ziping.zhou", "email": "ziping.zhou@104.com.tw"},
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "EHRMS Tools",
+    "shortDescription": "EHRMS 維運與開發工具",
+    "longDescription": "共用 Jira、MSSQL 與團隊記憶 MCP，以及維運查案、週報、測試與客製分析技能。需要本機 Python 與公司網路。",
+    "developerName": "EHRMS",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["幫我查看 EHRMSONE 維運單", "檢查 EHRMS MCP 設定", "整理本週 Jira 週報"]
+  }
+}
