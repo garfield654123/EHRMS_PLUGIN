@@ -1,6 +1,6 @@
 {
   "name": "ehrms-tools",
-  "version": "3.9.0",
+  "version": "3.10.0",
   "description": "EHRMS 開發工具包：Jira、唯讀資料庫查詢、團隊記憶與共用工作流程。",
   "author": {"name": "ziping.zhou", "email": "ziping.zhou@104.com.tw"},
   "skills": "./skills/",

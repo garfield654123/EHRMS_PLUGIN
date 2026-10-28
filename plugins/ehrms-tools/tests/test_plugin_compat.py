@@ -38,7 +38,8 @@ EXPECTED_TOOLS = {
     },
     "ehrms-memory": {
         "recall", "remember", "jira_lookup", "jira_log", "faq_lookup",
-        "bulletin_lookup", "task_lookup", "custom_sa_log", "custom_log",
+        "bulletin_lookup", "task_lookup", "sop_lookup", "wiki_lookup",
+        "custom_sa_log", "custom_log",
     },
 }
 
@@ -149,9 +150,12 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
     async def check_server(self, params, name):
         async with stdio_client(params) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
+                init = await session.initialize()
                 result = await session.list_tools()
                 self.assertEqual({tool.name for tool in result.tools}, EXPECTED_TOOLS[name])
+                if name == "ehrms-memory":
+                    # context.md 以伺服器說明常駐載入（搬移路徑後仍要讀得到）
+                    self.assertIn("EHRMS 知識庫使用說明", init.instructions or "")
                 if name == "ehrms-database":
                     result = await session.call_tool("echo", {"message": "offline-ping"})
                     self.assertFalse(result.isError)

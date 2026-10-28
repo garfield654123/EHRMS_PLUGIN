@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK 共用查詢邏輯（純查詢，AI 不寫入）
+"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK / HRMS_FAQ_SOP 共用查詢邏輯（純查詢，AI 不寫入）
 
 三表皆由人工在 DB 端直接維護（人工檢核過的高精度資料），與 AI 自動累積、
 需要去重／supersede／審核狀態的 HRMS_MEMORY、HRMS_JIRA 性質不同：
@@ -18,9 +18,13 @@ TABLE_CONF = {
     "faq": {"topic_field": "question", "content_fields": ("answer",)},
     "bulletin": {"topic_field": "title", "content_fields": ("content",)},
     "task": {"topic_field": "task_name", "content_fields": ("scenario",)},
+    "sop": {"topic_field": "title", "content_fields": ("description", "content")},
 }
 
-LABELS = {"faq": "FAQ", "bulletin": "公告", "task": "罐頭語法"}
+LABELS = {"faq": "FAQ", "bulletin": "公告", "task": "罐頭語法", "sop": "SOP"}
+
+# SOP 類型以標題前綴區分（HRMS_FAQ_SOP 沒有分類欄位）
+SOP_KINDS = {"流程": "【流程】", "上版": "【上版】", "補件": "【補件】"}
 
 TASK_DISCLAIMER = ("⚠️ 以上為人工整理之罐頭語法範本，仍須人工確認參數與實際影響範圍後才可執行；"
                     "AI 不可自動執行此 SQL。")
@@ -40,6 +44,11 @@ def _fmt(table_key, r, score=None):
         if r.get("category"):
             head += f"（{r['category']}）"
         return [head, f"  {r['content']}"]
+    if table_key == "sop":
+        head += f" {r['title']}"
+        if r.get("category"):
+            head += f"（{r['category']}）"
+        return [head, r["content"].strip()]
     # task
     head += f" {r['task_name']}（風險：{r.get('risk_level') or '中'}）"
     lines = [head]
@@ -55,9 +64,12 @@ def _fmt(table_key, r, score=None):
     return lines
 
 
-def lookup(table_key, query, category=None, top_k=5):
-    """三表共用查詢：query 與各表 topic/content 做 bigram＋關鍵字相似度比對，
-    回傳 top_k 筆（依相似度排序）。category 可選（限定分類）。"""
+def lookup(table_key, query, category=None, top_k=5, kind=None):
+    """共用查詢：query 與各表 topic/content 做 bigram＋關鍵字相似度比對，
+    回傳 top_k 筆（依相似度排序）。category 可選（限定分類）。
+    kind 僅 sop 使用：流程／上版／補件，依標題前綴篩選。"""
+    if kind and kind not in SOP_KINDS:
+        return f"⚠️ kind 只能是 {' / '.join(SOP_KINDS)}。"
     if table_key not in TABLE_CONF:
         return f"⚠️ 未知的資料類型：{table_key}"
     if not db.db_enabled():
@@ -76,6 +88,8 @@ def lookup(table_key, query, category=None, top_k=5):
     scored = []
     for r in rows:
         if category and (r.get("category") or "").strip() != category.strip():
+            continue
+        if kind and not (r.get("title") or "").startswith(SOP_KINDS[kind]):
             continue
         topic = r.get(conf["topic_field"], "") or ""
         content = " ".join(r.get(f, "") or "" for f in conf["content_fields"])

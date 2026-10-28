@@ -3,10 +3,14 @@
 """EHRMS memory MCP server（stdio）——團隊共用記憶＋Jira 結案紀錄＋人工維護參考資料
 ① recall / remember：跨單可泛化知識（HRMS_MEMORY）
 ② jira_lookup / jira_log：單一案件結案紀錄（HRMS_JIRA，一單一筆有效紀錄）
-③ faq_lookup / bulletin_lookup / task_lookup：人工維護的高精度參考資料
-   （HRMS_FAQ／HRMS_FAQ_BULLETIN／HRMS_TASK，直接查原表，純查詢，AI 不寫入）
+③ faq_lookup / bulletin_lookup / task_lookup / sop_lookup：人工維護的高精度參考資料
+   （HRMS_FAQ／HRMS_FAQ_BULLETIN／HRMS_TASK／HRMS_FAQ_SOP，直接查原表，純查詢，AI 不寫入）
+④ wiki_lookup：系統原則與大規則（HRMS_WIKI，由 eHRMS-Wiki 發佈，純查詢）
+伺服器說明（instructions）載入 plugin 根目錄的 context.md，作為常駐的知識庫使用說明。
 """
 import asyncio
+from pathlib import Path
+
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool
@@ -14,10 +18,22 @@ from mcp.types import Tool
 import memory_core as mc
 import jira_core as jc
 import refdata_core as rc
+import wiki_core as wc
 import custom_sa_core as sc
 import custom_core as cc
 
-server = Server("ehrms-memory")
+_CONTEXT_FILE = Path(__file__).resolve().parents[2] / "context.md"
+
+
+def _load_instructions():
+    """讀 context.md 當伺服器說明；檔案不存在或讀取失敗時不影響工具運作。"""
+    try:
+        return _CONTEXT_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+server = Server("ehrms-memory", instructions=_load_instructions())
 
 
 def _text(s):
@@ -179,6 +195,45 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="sop_lookup",
+            description=(
+                "查 HRMS_FAQ_SOP（團隊作業 SOP，人工維護）。三類："
+                "補件＝某類問題資料不足時要請客戶／顧問補哪些資料；"
+                "流程＝維運單處理與客戶端 SQL 交付等步驟；上版＝程式修改到正式釋出的步驟與規範。"
+                "疑似異常但資訊不足時，先用 kind=補件 查詢，再向使用者列出需補的資料。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "問題或作業敘述（中文）"},
+                    "kind": {"type": "string", "enum": ["補件", "流程", "上版"],
+                             "description": "只查某一類（可選）"},
+                    "top_k": {"type": "integer", "description": "回傳筆數，預設 3"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="wiki_lookup",
+            description=(
+                "查 EHRMS Wiki（HRMS_WIKI：系統原則、大規則、選單位置、程式所在資料夾、關鍵資料表與設定）。"
+                "兩種用法：給 query 搜尋，回傳頁面摘要與命中的規則（Rn）；"
+                "給 page（主題代碼、路徑或標題）加 section（規則編號如 R7、章節名如 程式地圖、或 上半／下半／全文）讀原文。"
+                "規則引用的記憶若已被取代，會標示新編號。未給 customer_code 時不回傳客製頁。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "問題敘述（搜尋模式）"},
+                    "page": {"type": "string", "description": "主題代碼、GIT_PATH 或頁面標題（章節模式）"},
+                    "section": {"type": "string",
+                                "description": "規則編號（R7）、章節名、上半／下半／全文；未給則回傳該頁目錄"},
+                    "customer_code": {"type": "string", "description": "客戶統編（要看客製頁時才給）"},
+                    "top_k": {"type": "integer", "description": "搜尋模式回傳頁數，預設 3"},
+                },
+            },
+        ),
+        Tool(
             name="custom_sa_log",
             description=(
                 "寫入/更新一筆 HRMS_CUSTOM_SA（客製分支 SA 規格文件索引，唯一寫入口）。"
@@ -275,6 +330,15 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
     if name == "task_lookup":
         return _text(rc.lookup(
             "task", arguments["query"], None, arguments.get("top_k", 5)))
+    if name == "sop_lookup":
+        return _text(rc.lookup(
+            "sop", arguments["query"], None, arguments.get("top_k", 3),
+            kind=arguments.get("kind")))
+    if name == "wiki_lookup":
+        return _text(wc.lookup(
+            query=arguments.get("query"), page=arguments.get("page"),
+            section=arguments.get("section"), customer_code=arguments.get("customer_code"),
+            top_k=arguments.get("top_k", 3)))
     if name == "custom_sa_log":
         return _text(sc.log_doc(
             arguments["tax_id"], arguments["branch_name"], arguments["doc_path"],

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK 資料層（純查詢，直接讀原表）
+"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK / HRMS_FAQ_SOP 資料層（純查詢，直接讀原表）
 
 三表皆由人工在 DB 端直接維護（INSERT/UPDATE），MCP 帳號僅有 SELECT 權限，
 本模組沒有任何寫入函式。連線與環境變數沿用 memory_db（同一組 MSSQL 帳號）。
@@ -42,6 +42,14 @@ TABLES = {
                 "FROM dbo.HRMS_TASK"),
         "columns": ["ID", "TASK_NAME", "SCENARIO", "SQL_TEMPLATE", "PARAMS",
                     "AFFECTED_TABLE", "RISK_LEVEL", "PRECAUTIONS", "KEYWORDS"],
+    },
+    # sop <- HRMS_FAQ_SOP（團隊作業流程與排查補件清單；類型以標題前綴【流程】【上版】【補件】區分）
+    "sop": {
+        "sql": ("SELECT sop_id AS ID, title AS TITLE, ISNULL(description, N'') AS DESCRIPTION, "
+                "CONVERT(NVARCHAR(MAX), content) AS CONTENT, ISNULL(module, N'') AS CATEGORY, "
+                "ISNULL(keywords, N'') AS KEYWORDS "
+                "FROM dbo.HRMS_FAQ_SOP WHERE is_active = 1"),
+        "columns": ["ID", "TITLE", "DESCRIPTION", "CONTENT", "CATEGORY", "KEYWORDS"],
     },
 }
 

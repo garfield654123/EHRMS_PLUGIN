@@ -2,10 +2,20 @@
 
 EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**ehrms-memory 團隊共用記憶** 及 **MCP 設定管理 Skill**。
 
+## v3.10.0：Wiki 與 SOP 查詢、常駐使用說明
+
+| 新增 | 說明 |
+|---|---|
+| `wiki_lookup` | 查 EHRMS Wiki（HRMS_WIKI，讀 `vwHRMS_WIKI_SEARCH`）。給 `query` 搜尋頁面與命中規則（Rn）；給 `page`（主題代碼／路徑／標題）＋`section`（`R7`、章節名、`上半`／`下半`／`全文`）讀原文。規則引用的記憶若已被取代，自動標示新編號；未給 `customer_code` 不回傳客製頁 |
+| `sop_lookup` | 查 HRMS_FAQ_SOP；`kind` 可限定 補件／流程／上版（依標題前綴【補件】【流程】【上版】） |
+| `context.md` | 知識庫使用說明（知識來源、查詢順序、寫回規則、必守限制）。ehrms-memory 以伺服器說明（instructions）送出，啟用插件即常駐載入，不需另外設定 |
+
+Wiki 正本在 104corp/eHRMS-Wiki，由指定工程師發佈到 HRMS_WIKI；格式見 EHRMS_GIT `docs/knowledge-wiki/Wiki頁面撰寫規範.md`。
+
 ## v3.9.0：Claude Code 與 Codex 共用
 
 支援 Windows 上的 Claude Code 與具本機執行能力的 Codex（GPT）。
-三個 MCP、27 個工具及 10 個技能共用同一份程式。純網頁 ChatGPT 不會直接執行本機 Python；
+三個 MCP、29 個工具（v3.10.0 起）及 10 個技能共用同一份程式。純網頁 ChatGPT 不會直接執行本機 Python；
 本版本未將公司資料庫或 MCP 發布至公網。
 
 ### 安裝
