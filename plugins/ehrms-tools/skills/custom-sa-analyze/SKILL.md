@@ -3,6 +3,8 @@ name: custom-sa-analyze
 description: 深度解析單一客製分支的 SA 規格文件，摘要客製邏輯並與實際程式碼交叉驗證，寫入 HRMS_CUSTOM_SA。由 headless 批次呼叫，非互動使用；一次只處理一個指定分支（分支名稱由呼叫端 prompt 指定）。備份版本——正本在 CUSTOM_GIT/.claude/skills/custom-sa-analyze（該 repo 無穩定分支可版控，這裡是唯一有 git 歷史的副本）。轉檔輔助腳本 doc_to_pdf.py 備份在同目錄 scripts/。
 ---
 
+執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
+
 # 客製 SA 規格深度分析
 
 輸入：一個 CUSTOM_GIT 分支名稱（由呼叫端 prompt 指定，不主動詢問使用者——這是 headless 批次流程，無人在場確認）。
@@ -42,7 +44,7 @@ description: 深度解析單一客製分支的 SA 規格文件，摘要客製邏
 
 1. **Read 工具無法直接讀取 Word/Excel 格式**（`.doc`/`.docx`/`.xls`/`.xlsx` 皆然，不是只有舊版 `.doc`）。讀取前先用 PowerShell（不要用 Git Bash／MSYS，中文路徑 argv 會被錯誤解碼導致「找不到檔案」）呼叫轉檔工具，轉成 PDF 後再用 Read 工具讀：
    ```powershell
-   py C:\D\CUSTOM_GIT\.claude\scripts\doc_to_pdf.py "<文件完整路徑>"
+   py -3 "<本 SKILL.md 所在目錄>\scripts\doc_to_pdf.py" "<文件完整路徑>"
    ```
    成功會印出轉檔後的 PDF 路徑（存在 `C:\D\CUSTOM_GIT_SA_PDF_CACHE\<分支名稱>\`，**持久保留、不要事後刪除**——供人工日後回頭核對規格書原文與截圖，這是唯一能重看原始畫面的地方）。用 Read 工具讀那個路徑。
    若轉檔失敗（例如檔案損毀、COM 元件無法啟動），不要跳過不記錄——寫入 `parse_issue="轉檔失敗：<錯誤訊息>"`，`analyzed=0`

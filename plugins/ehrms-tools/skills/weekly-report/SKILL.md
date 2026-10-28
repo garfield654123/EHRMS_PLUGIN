@@ -1,8 +1,11 @@
 ---
 name: weekly-report
 description: This skill should be used when the user asks to "產出週會報告", "整理本週jira單", "幫我做週報", "generate weekly report", "週會資料整理", or wants to compile Jira tickets into a weekly meeting table. Fetches Jira tickets where Engineer = the current user for the current week and generates a structured meeting report row.
-version: 0.1.0
+metadata:
+  version: "0.1.0"
 ---
+
+執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
 
 # EHRMS 週會報告產生器
 
@@ -35,7 +38,7 @@ version: 0.1.0
 使用 Jira MCP 查詢：
 - **狀態為 To Do（待辦事項）的單**：篩選條件用 `assignee`，不要用 Engineer 欄位。
   - 原因：To Do 單常常 Engineer 欄位還沒填（例如客戶剛回報、尚未指派負責人時 Engineer 為空），但 assignee 已經指向目前的承辦人，用 Engineer 篩會漏單（實例：EHRMSONE-33768，Engineer 為 null 但 assignee 已是本人）。
-- **其他狀態的單**（非 To Do）：篩選條件用 Engineer（customfield_13907）= 使用者本人的 Jira Email（未特別指定時，依 CLAUDE.md 設定的預設查詢者）。
+- **其他狀態的單**（非 To Do）：篩選條件用 Engineer（customfield_13907）= 使用者本人的 Jira Email（未特別指定時，依目前平台專案規範 CLAUDE.md／AGENTS.md 的預設查詢者；未設定則使用 Jira get_user_info 確認目前帳號）。
 - created 範圍：**上禮拜二 ~ 本週三**（因為週會固定在週三舉行）
   - 計算方式：今天（週三）往回推 8 天 = 上禮拜二
   - 例如今天是 2026-04-15（三），start = 2026-04-07（上週二）

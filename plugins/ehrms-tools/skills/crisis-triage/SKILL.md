@@ -3,6 +3,8 @@ name: crisis-triage
 description: EHRMS Jira 維運單（Crisis 單）查單與除錯流程規範。重要規則：EHRMS 是架在客戶端的地端系統，公司內 DB 沒有客戶資料，查維運單時禁止用 DB MCP 找客戶資料/測試資料。Use when the user asks to 查/看 a Jira ticket (e.g. "幫我看 32543", "查 EHRMSONE-XXXXX"), when the issue type is Crisis - Level A/B/C, or when debugging a customer-reported (客戶回報/維運) problem.
 ---
 
+執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
+
 # EHRMS 維運單（Crisis 單）查單與除錯流程
 
 ## 核心規則（最優先）
@@ -18,18 +20,23 @@ description: EHRMS Jira 維運單（Crisis 單）查單與除錯流程規範。�
 
 例外：使用者**明確要求**查 DB 時才使用（例如指名「用 DB MCP 查」或問題明確屬於自家環境資料）。
 
+`faq_lookup`／`bulletin_lookup`／`task_lookup` 查的是 HRMS_FAQ／HRMS_BULLETIN／HRMS_TASK——
+**人工整理維護的自家維運知識庫**，不是客戶資料，不受上述禁令限制（同 `hrms_sys_rule` 的既有例外）。
+
 ## 標準流程
 
 ```
-取單 → recall＋jira_lookup → 判斷單型 → 讀附件截圖 → 追碼 → 診斷報告（前置 remember＋jira_log）→ 停止等確認
+取單 → recall＋jira_lookup＋faq_lookup＋bulletin_lookup（四路並行）→ 判斷單型
+     → 讀附件截圖 → 追碼 →（需修正資料才查 task_lookup）→ 診斷報告（前置 remember＋jira_log）→ 停止等確認
 ```
 
 ### 1. 取單
 
 - 單號只給數字時補預設前綴 `EHRMSONE`
 - `get_issue` 一次到位：回傳精簡欄位＋完整描述＋**最新 10 筆評論**（新→舊）；需要更早的討論再用 `get_comments` 調大 `limit`
-- 取單後立刻並行呼叫（帶問題敘述）：ehrms-memory 的 `recall`（過往沉澱的系統知識與程式入口）＋ `jira_lookup`（過往相似案件的根因與解法）
+- 取單後立刻並行呼叫（帶問題敘述）：ehrms-memory 的 `recall`（過往沉澱的系統知識與程式入口）＋ `jira_lookup`（過往相似案件的根因與解法）＋ `faq_lookup`（人工維護的常見問題）＋ `bulletin_lookup`（人工維護的公告，已自動排除過期／未生效）
 - `jira_lookup` 相似結果分兩層：**✅已審核**（根因經人工確認）可直接當診斷參考並在報告中引用；**⏳未審核** 僅供方向參考，引用前須自行追碼驗證，報告中須註明「未經審核」
+- `faq_lookup`／`bulletin_lookup` 是人工檢核過的高精度資料，命中且能完全解釋問題時可直接引用其解答加速結案；未命中或無法完全解釋則照常繼續判斷單型、追碼
 - 從範本欄位雜訊中萃取：標題、描述、issuetype、狀態、客戶名稱、附件清單
 
 ### 2. 判斷單型
@@ -56,9 +63,15 @@ description: EHRMS Jira 維運單（Crisis 單）查單與除錯流程規範。�
 - Big5 的 .cls 先轉 UTF-8 暫存檔再搜尋中文訊息（直接 Grep 中文搜不到）
 - 診斷證據來源＝**截圖 + 程式碼**，不是 DB 資料
 
-### 5. 輸出與收尾
+### 5. 需修正資料時查罐頭語法
 
-- 依專案 CLAUDE.md 輸出 5 區塊診斷報告（問題摘要/問題程式碼/修復方案/驗證步驟/風險評估）
+- 診斷結論為「**需要修正客戶資料**」才呼叫 `task_lookup`（情境敘述）——查 HRMS_TASK 有無現成罐頭語法可套用
+- 有命中：在修復方案中引用 SQL 範本、參數、`RISK_LEVEL`、`PRECAUTIONS`，並保留「仍須人工確認參數與影響範圍、AI 不可自動執行」的提醒（`task_lookup` 已固定附加）
+- 無命中：維持原本個案 SQL 建議流程（請 CS/客戶端協助執行）
+
+### 6. 輸出與收尾
+
+- 依目前平台的專案規範（Claude Code：CLAUDE.md；Codex：AGENTS.md）輸出診斷報告；未另訂格式時使用 5 區塊（問題摘要/問題程式碼/修復方案/驗證步驟/風險評估）
 - 需要客戶資料佐證的部分，附上 SQL 與說明請 CS/客戶端執行
 - 報告輸出前沉澱兩件事（互補、各寫各的）：
   1. **結案紀錄** → 先 `jira_lookup(單號)` 查重：無紀錄 → `jira_log(kind="Crisis", jira_key=單號, title=一句話摘要, root_cause=根因, resolution=解決方式, changed_files=有改程式才填（repo 相對路徑，如 `VB/EHRMS/xx.cls :: 函式`，勿用 C:\ 開頭的本機路徑）, keywords=3~8 個)`；已有紀錄且本次結論不同 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫

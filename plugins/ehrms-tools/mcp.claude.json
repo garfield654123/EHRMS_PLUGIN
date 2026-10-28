@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "ehrms-database": {
+      "command": "py",
+      "args": ["-3", "-B", "${CLAUDE_PLUGIN_ROOT}/scripts/run_mcp.py", "database"]
+    },
+    "EHRMS-jira-mcp": {
+      "command": "py",
+      "args": ["-3", "-B", "${CLAUDE_PLUGIN_ROOT}/scripts/run_mcp.py", "jira"]
+    },
+    "ehrms-memory": {
+      "command": "py",
+      "args": ["-3", "-B", "${CLAUDE_PLUGIN_ROOT}/scripts/run_mcp.py", "memory"]
+    }
+  }
+}

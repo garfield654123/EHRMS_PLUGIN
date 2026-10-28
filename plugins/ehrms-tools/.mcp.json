@@ -1,37 +1,22 @@
 {
+  "mcpServers": {
   "ehrms-database": {
     "command": "py",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/servers/MCP_1.0/server.py"],
-    "env": {
-      "MCP_MODE": "stdio",
-      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/MCP_1.0",
-      "MSSQL_SERVER": "${MSSQL_SERVER}",
-      "MSSQL_DATABASE": "${MSSQL_DATABASE}",
-      "MSSQL_USERNAME": "${MSSQL_USERNAME}",
-      "MSSQL_PASSWORD": "${MSSQL_PASSWORD}"
-    }
+    "args": ["-3", "-B", "scripts/run_mcp.py", "database"],
+    "cwd": ".",
+    "env_vars": ["MSSQL_SERVER", "MSSQL_DATABASE", "MSSQL_USERNAME", "MSSQL_PASSWORD", "EHRMS_ENV_FILE"]
   },
   "EHRMS-jira-mcp": {
     "command": "py",
-    "args": ["-m", "jira_mcp"],
-    "env": {
-      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/JIRA_MCP",
-      "JIRA_BASE_URL": "${JIRA_BASE_URL}",
-      "JIRA_EMAIL": "${JIRA_EMAIL}",
-      "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
-    }
+    "args": ["-3", "-B", "scripts/run_mcp.py", "jira"],
+    "cwd": ".",
+    "env_vars": ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "EHRMS_ENV_FILE"]
   },
   "ehrms-memory": {
     "command": "py",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/servers/MEMORY/server.py"],
-    "env": {
-      "MCP_MODE": "stdio",
-      "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/servers/MEMORY",
-      "MSSQL_SERVER": "${MSSQL_SERVER}",
-      "MSSQL_DATABASE": "${MSSQL_DATABASE}",
-      "MSSQL_USERNAME": "${MSSQL_USERNAME}",
-      "MSSQL_PASSWORD": "${MSSQL_PASSWORD}",
-      "JIRA_EMAIL": "${JIRA_EMAIL}"
-    }
+    "args": ["-3", "-B", "scripts/run_mcp.py", "memory"],
+    "cwd": ".",
+    "env_vars": ["MSSQL_SERVER", "MSSQL_DATABASE", "MSSQL_USERNAME", "MSSQL_PASSWORD", "JIRA_EMAIL", "MEMORY_USER", "EHRMS_ENV_FILE"]
+  }
   }
 }

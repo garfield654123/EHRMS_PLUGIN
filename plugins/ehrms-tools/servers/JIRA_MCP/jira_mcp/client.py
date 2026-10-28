@@ -32,32 +32,40 @@ class JiraClient:
         """執行 HTTP 請求"""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                auth=self.auth,
-                headers=self.headers,
-                params=params,
-                json=json_data,
-                timeout=30.0
-            )
+        # connect 逾時設短一點，離線時快速失敗；read 保留較長時間給正常的慢回應
+        timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
-            # 根據 Jira REST API v3 標準處理錯誤
-            if response.status_code == 400:
-                raise ValueError(f"請求無效: {response.text}")
-            elif response.status_code == 401:
-                raise ValueError("未授權: 請檢查 API Token 是否有效")
-            elif response.status_code == 403:
-                raise ValueError("權限不足: 請檢查用戶權限")
-            elif response.status_code == 404:
-                raise ValueError("資源未找到")
-            elif response.status_code == 410:
-                raise ValueError("資源已過期或不可用")
-            elif response.status_code >= 400:
-                response.raise_for_status()
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    auth=self.auth,
+                    headers=self.headers,
+                    params=params,
+                    json=json_data,
+                    timeout=timeout
+                )
+        except httpx.TransportError as e:
+            raise ValueError(
+                "無法連線到 Jira（可能目前不在公司網路環境，或 JIRA_BASE_URL 設定錯誤），"
+                f"請確認網路連線後再試。（原始錯誤：{e}）") from e
 
-            return response.json()
+        # 根據 Jira REST API v3 標準處理錯誤
+        if response.status_code == 400:
+            raise ValueError(f"請求無效: {response.text}")
+        elif response.status_code == 401:
+            raise ValueError("未授權: 請檢查 API Token 是否有效")
+        elif response.status_code == 403:
+            raise ValueError("權限不足: 請檢查用戶權限")
+        elif response.status_code == 404:
+            raise ValueError("資源未找到")
+        elif response.status_code == 410:
+            raise ValueError("資源已過期或不可用")
+        elif response.status_code >= 400:
+            response.raise_for_status()
+
+        return response.json()
 
     async def get(self, endpoint: str, params: Optional[dict] = None) -> dict[str, Any]:
         """執行 GET 請求"""
@@ -464,14 +472,20 @@ class JiraClient:
         Returns:
             附件的二進位內容
         """
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(
-                content_url,
-                auth=self.auth,
-                timeout=60.0
-            )
-            response.raise_for_status()
-            return response.content
+        timeout = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(
+                    content_url,
+                    auth=self.auth,
+                    timeout=timeout
+                )
+                response.raise_for_status()
+                return response.content
+        except httpx.TransportError as e:
+            raise ValueError(
+                "無法連線到 Jira（可能目前不在公司網路環境，或 JIRA_BASE_URL 設定錯誤），"
+                f"請確認網路連線後再試。（原始錯誤：{e}）") from e
 
     async def download_attachment_to_local(
         self,
