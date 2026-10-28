@@ -2,6 +2,18 @@
 
 EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**ehrms-memory 團隊共用記憶** 及 **MCP 設定管理 Skill**。
 
+## v3.11.0：FAQ／Task／SOP 的 AI 寫入口、AI 寫入者標記
+
+| 新增／調整 | 說明 |
+|---|---|
+| `faq_log` | 寫入 HRMS_FAQ。module 須為既有值；同表高相似擋下並回傳既有 ID |
+| `task_log` | 寫入 HRMS_TASK。refs 須含 HRMS_JIRA 已有的單號；syntax 檢查 SQL Server 2008 相容、UPDATE／DELETE 必有 WHERE、異動包 BEGIN TRAN 且 COMMIT 註解掉 |
+| `sop_log` | 寫入 HRMS_FAQ_SOP。content 須依 SOP 模板（## 適用情境＋前置確認／處理方式／需要客戶補的資料至少一段） |
+| AI 寫入者 | `remember`、`jira_log` 與上述三個工具的寫入者一律為「使用者(AI)」，如 `ziping.zhou(AI)` |
+| 查詢標示 | FAQ／Task／SOP 查詢時，AI 寫的筆標 🤖 AI 撰寫（Task 另加確認提醒）；`jira_lookup` 加註「精度較低、僅供參考」 |
+
+三個寫入工具共同規則：`refs`（依據）必填並附在內容尾端；帶 `id` 為更新，只能改 AI 寫的筆，人工資料不可修改。
+
 ## v3.10.0：Wiki 與 SOP 查詢、常駐使用說明
 
 | 新增 | 說明 |
@@ -15,7 +27,7 @@ Wiki 正本在 104corp/eHRMS-Wiki，由指定工程師發佈到 HRMS_WIKI；格�
 ## v3.9.0：Claude Code 與 Codex 共用
 
 支援 Windows 上的 Claude Code 與具本機執行能力的 Codex（GPT）。
-三個 MCP、29 個工具（v3.10.0 起）及 10 個技能共用同一份程式。純網頁 ChatGPT 不會直接執行本機 Python；
+三個 MCP、32 個工具（v3.11.0 起）及 10 個技能共用同一份程式。純網頁 ChatGPT 不會直接執行本機 Python；
 本版本未將公司資料庫或 MCP 發布至公網。
 
 ### 安裝

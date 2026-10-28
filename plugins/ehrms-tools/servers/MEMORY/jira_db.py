@@ -63,7 +63,7 @@ def insert_case(jira_key, kind, title, root_cause, resolution,
         f"SELECT CAST(SCOPE_IDENTITY() AS INT)",
         (jira_key, kind, title, root_cause, resolution,
          changed_files or None, keywords or None, supersedes_id,
-         mdb.created_by(),
+         mdb.created_by_ai(),
          json.dumps(meta, ensure_ascii=False) if meta else None))
     new_id = cur.fetchone()[0]
     invalidate_cache()

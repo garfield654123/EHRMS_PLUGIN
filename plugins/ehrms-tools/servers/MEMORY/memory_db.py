@@ -35,6 +35,11 @@ def created_by():
     return os.getenv("USERNAME") or os.getenv("USER") or "unknown"
 
 
+def created_by_ai():
+    """AI 經由 MCP 寫入時的記錄者：使用者身分後綴 (AI)，如 ziping.zhou(AI)。"""
+    return f"{created_by()}(AI)"
+
+
 _NETWORK_SQLSTATES = {"08001", "08004", "08S01", "HYT00"}
 
 
@@ -133,7 +138,7 @@ def insert_memory(mem_type, topic, content, keywords="", func_path="",
         f"SELECT CAST(SCOPE_IDENTITY() AS INT)",
         (mem_type, topic, content, keywords or None, func_path or None,
          entry_path or None, entry_method or None, supersedes_id,
-         ref_key or None, source or None, created_by(),
+         ref_key or None, source or None, created_by_ai(),
          json.dumps(meta, ensure_ascii=False) if meta else None))
     new_id = cur.fetchone()[0]
     invalidate_cache()

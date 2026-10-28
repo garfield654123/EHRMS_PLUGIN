@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK / HRMS_FAQ_SOP 共用查詢邏輯（純查詢，AI 不寫入）
+"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK / HRMS_FAQ_SOP 共用查詢邏輯
 
-三表皆由人工在 DB 端直接維護（人工檢核過的高精度資料），與 AI 自動累積、
-需要去重／supersede／審核狀態的 HRMS_MEMORY、HRMS_JIRA 性質不同：
-- 沒有寫入工具，內容由人工直接 INSERT/UPDATE
+內容以人工在 DB 端維護為主（人工檢核過的高精度資料）：
+- FAQ／Task／SOP 另有 AI 寫入口（refdata_write），寫入者為「使用者(AI)」，查詢時標示 🤖 AI 撰寫
 - 原表雖有 REVIEW_STATUS 欄位，但目前皆為 pending，故查詢時不以審核狀態過濾；引用時不可當作已審核資料
 - 評分器直接重用 memory_core（bigram＋關鍵字比對，作法同 jira_core 對 mc._score 的重用）
 
@@ -23,14 +22,23 @@ TABLE_CONF = {
 
 LABELS = {"faq": "FAQ", "bulletin": "公告", "task": "罐頭語法", "sop": "SOP"}
 
+AI_TAG = " 🤖 AI 撰寫"
+AI_TASK_WARNING = "  ⚠️ AI 撰寫的語法，尚未經人工實際執行驗證，套用前須逐行確認。"
+
 TASK_DISCLAIMER = ("⚠️ 以上為人工整理之罐頭語法範本，仍須人工確認參數與實際影響範圍後才可執行；"
                     "AI 不可自動執行此 SQL。")
+
+
+def is_ai(r):
+    return (r.get("author") or "").endswith("(AI)")
 
 
 def _fmt(table_key, r, score=None):
     head = f"- **[ID {r['id']}]**"
     if score is not None:
         head += f"（相似 {score:.2f}）"
+    if is_ai(r):
+        head += AI_TAG
     if table_key == "faq":
         head += f" {r['question']}"
         if r.get("category"):
@@ -49,6 +57,8 @@ def _fmt(table_key, r, score=None):
     # task
     head += f" {r['task_name']}（風險：{r.get('risk_level') or '中'}）"
     lines = [head]
+    if is_ai(r):
+        lines.append(AI_TASK_WARNING)
     if r.get("scenario"):
         lines.append(f"  適用情境：{r['scenario']}")
     lines.append(f"  SQL 範本：\n```sql\n{r['sql_template']}\n```")

@@ -3,8 +3,9 @@
 """EHRMS memory MCP server（stdio）——團隊共用記憶＋Jira 結案紀錄＋人工維護參考資料
 ① recall / remember：跨單可泛化知識（HRMS_MEMORY）
 ② jira_lookup / jira_log：單一案件結案紀錄（HRMS_JIRA，一單一筆有效紀錄）
-③ faq_lookup / bulletin_lookup / task_lookup / sop_lookup：人工維護的高精度參考資料
-   （HRMS_FAQ／HRMS_FAQ_BULLETIN／HRMS_TASK／HRMS_FAQ_SOP，直接查原表，純查詢，AI 不寫入）
+③ faq_lookup / bulletin_lookup / task_lookup / sop_lookup：人工維護為主的參考資料
+   （HRMS_FAQ／HRMS_FAQ_BULLETIN／HRMS_TASK／HRMS_FAQ_SOP，直接查原表）
+   faq_log / task_log / sop_log：AI 寫入口，寫入者記為「使用者(AI)」，不可改人工資料
 ④ wiki_lookup：系統原則與大規則（HRMS_WIKI，由 eHRMS-Wiki 發佈，純查詢）
 伺服器說明（instructions）載入 plugin 根目錄的 context.md，作為常駐的知識庫使用說明。
 """
@@ -18,6 +19,7 @@ from mcp.types import Tool
 import memory_core as mc
 import jira_core as jc
 import refdata_core as rc
+import refdata_write as rw
 import wiki_core as wc
 import custom_sa_core as sc
 import custom_core as cc
@@ -212,6 +214,76 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="faq_log",
+            description=(
+                "新增或更新一筆 HRMS_FAQ（AI 撰寫，回答者記為「使用者(AI)」）。"
+                "結論已確認、可直接回覆客戶，且 faq_lookup 查無相同問題時呼叫。"
+                "answer 寫給客戶看的回覆（不放程式路徑、SQL）。"
+                "同表高相似會擋下並回傳既有 ID；人工 FAQ 不可修改。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "客戶的問題（用客戶會問的說法）"},
+                    "answer": {"type": "string", "description": "回覆內容（客戶看得懂的操作與說明）"},
+                    "module": {"type": "string", "description": "模組，須為既有值（如 M1、M2、WF）"},
+                    "sub_category": {"type": "string", "description": "子分類（可選，50 字內）"},
+                    "refs": {"type": "string", "description": "依據：Jira 單號、記憶 #、Wiki 頁 Rn、FAQ／Task ID 等（必填，會附在內容尾端）"},
+                    "id": {"type": "integer",
+                           "description": "要更新的既有 ID（只限 AI 寫的筆；未給則新增）"},
+                },
+                "required": ["question", "answer", "module", "refs"],
+            },
+        ),
+        Tool(
+            name="task_log",
+            description=(
+                "新增或更新一筆 HRMS_TASK 罐頭語法（AI 撰寫，作者記為「使用者(AI)」）。"
+                "只在實際案件已用此語法修正資料並確認無誤後呼叫；refs 須含已寫入 HRMS_JIRA 的單號。"
+                "syntax 會檢查：SQL Server 2008 相容、UPDATE／DELETE 必有 WHERE、"
+                "異動須包 BEGIN TRAN 且 COMMIT 註解掉。人工 Task 不可修改。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_name": {"type": "string", "description": "語法名稱（情境＋動作，如『解鎖已關帳假單』）"},
+                    "task_description": {"type": "string", "description": "適用情境與前置確認"},
+                    "syntax": {"type": "string", "description": "SQL 範本；參數處加註解說明要替換什麼"},
+                    "notes": {"type": "string", "description": "執行前確認事項與影響範圍"},
+                    "module": {"type": "string", "description": "模組，須為既有值"},
+                    "category": {"type": "string", "description": "分類，須為既有值（如 資料修改、資料刪除、資料查詢）"},
+                    "related_faq_id": {"type": "integer", "description": "相關 FAQ ID（可選）"},
+                    "refs": {"type": "string", "description": "依據：Jira 單號、記憶 #、Wiki 頁 Rn、FAQ／Task ID 等（必填，會附在內容尾端）；須含 HRMS_JIRA 已有的單號"},
+                    "id": {"type": "integer",
+                           "description": "要更新的既有 ID（只限 AI 寫的筆；未給則新增）"},
+                },
+                "required": ["task_name", "task_description", "syntax", "notes", "module", "category", "refs"],
+            },
+        ),
+        Tool(
+            name="sop_log",
+            description=(
+                "新增或更新一筆 HRMS_FAQ_SOP 客戶需求處理 SOP（AI 撰寫，作者記為「使用者(AI)」）。"
+                "同一種客戶需求處理過、步驟已確認，且 sop_lookup 查無時呼叫。"
+                "content 依模板：# 標題、## 適用情境，再至少一段 ## 前置確認／## 處理方式／"
+                "## 需要客戶補的資料（可加 ## 處理後、## 相關）。人工 SOP 不可修改。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "客戶需求（如『客戶要求解鎖假勤』）"},
+                    "content": {"type": "string", "description": "SOP 內文（Markdown，依模板）"},
+                    "module": {"type": "string", "description": "模組，須為既有值（如 M1、COMMON）"},
+                    "keywords": {"type": "string", "description": "關鍵字，逗號分隔（可選）"},
+                    "description": {"type": "string", "description": "一句話摘要（可選）"},
+                    "refs": {"type": "string", "description": "依據：Jira 單號、記憶 #、Wiki 頁 Rn、FAQ／Task ID 等（必填，會附在內容尾端）"},
+                    "id": {"type": "integer",
+                           "description": "要更新的既有 ID（只限 AI 寫的筆；未給則新增）"},
+                },
+                "required": ["title", "content", "module", "refs"],
+            },
+        ),
+        Tool(
             name="wiki_lookup",
             description=(
                 "查 EHRMS Wiki（HRMS_WIKI：系統原則、大規則、選單位置、程式所在資料夾、關鍵資料表與設定）。"
@@ -331,6 +403,20 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
     if name == "sop_lookup":
         return _text(rc.lookup(
             "sop", arguments["query"], None, arguments.get("top_k", 3)))
+    if name == "faq_log":
+        return _text(rw.faq_log(
+            arguments["question"], arguments["answer"], arguments["module"], arguments["refs"],
+            sub_category=arguments.get("sub_category", ""), row_id=arguments.get("id")))
+    if name == "task_log":
+        return _text(rw.task_log(
+            arguments["task_name"], arguments["task_description"], arguments["syntax"],
+            arguments["notes"], arguments["module"], arguments["category"], arguments["refs"],
+            related_faq_id=arguments.get("related_faq_id"), row_id=arguments.get("id")))
+    if name == "sop_log":
+        return _text(rw.sop_log(
+            arguments["title"], arguments["content"], arguments["module"], arguments["refs"],
+            keywords=arguments.get("keywords", ""), description=arguments.get("description", ""),
+            row_id=arguments.get("id")))
     if name == "wiki_lookup":
         return _text(wc.lookup(
             query=arguments.get("query"), page=arguments.get("page"),

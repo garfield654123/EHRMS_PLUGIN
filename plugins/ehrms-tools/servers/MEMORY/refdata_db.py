@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK / HRMS_FAQ_SOP 資料層（純查詢，直接讀原表）
+"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK / HRMS_FAQ_SOP 資料層（直接讀原表）
 
-三表皆由人工在 DB 端直接維護（INSERT/UPDATE），MCP 帳號僅有 SELECT 權限，
-本模組沒有任何寫入函式。連線與環境變數沿用 memory_db（同一組 MSSQL 帳號）。
+內容以人工維護為主；FAQ／Task／SOP 另有 AI 寫入口（refdata_write），
+寫入者記為「使用者(AI)」，公告不開放寫入。連線與環境變數沿用 memory_db（同一組 MSSQL 帳號）。
 """
 import time
 
@@ -23,9 +23,10 @@ _cache = {}
 TABLES = {
     "faq": {
         "sql": ("SELECT FAQ_ID AS ID, QUESTION, ANSWER, "
-                "ISNULL(MODULE, N'') AS CATEGORY, ISNULL(SUB_CATEGORY, N'') AS KEYWORDS "
+                "ISNULL(MODULE, N'') AS CATEGORY, ISNULL(SUB_CATEGORY, N'') AS KEYWORDS, "
+                "ISNULL(RESPONDENT, N'') AS AUTHOR "
                 "FROM dbo.HRMS_FAQ"),
-        "columns": ["ID", "QUESTION", "ANSWER", "CATEGORY", "KEYWORDS"],
+        "columns": ["ID", "QUESTION", "ANSWER", "CATEGORY", "KEYWORDS", "AUTHOR"],
     },
     "bulletin": {
         "sql": ("SELECT ID, TITLE, CONTENT, ISNULL(TYPE, N'') AS CATEGORY, N'' AS KEYWORDS "
@@ -38,18 +39,19 @@ TABLES = {
                 "CONVERT(NVARCHAR(MAX), syntax) AS SQL_TEMPLATE, "
                 "N'' AS PARAMS, N'' AS AFFECTED_TABLE, N'未分級' AS RISK_LEVEL, "
                 "CONVERT(NVARCHAR(MAX), notes) AS PRECAUTIONS, "
-                "ISNULL(module, N'') + N' ' + ISNULL(category, N'') AS KEYWORDS "
+                "ISNULL(module, N'') + N' ' + ISNULL(category, N'') AS KEYWORDS, "
+                "ISNULL(author, N'') AS AUTHOR "
                 "FROM dbo.HRMS_TASK"),
         "columns": ["ID", "TASK_NAME", "SCENARIO", "SQL_TEMPLATE", "PARAMS",
-                    "AFFECTED_TABLE", "RISK_LEVEL", "PRECAUTIONS", "KEYWORDS"],
+                    "AFFECTED_TABLE", "RISK_LEVEL", "PRECAUTIONS", "KEYWORDS", "AUTHOR"],
     },
     # sop <- HRMS_FAQ_SOP（客戶需求處理 SOP：前置確認、操作路徑或 Task、需請客戶補的資料）
     "sop": {
         "sql": ("SELECT sop_id AS ID, title AS TITLE, ISNULL(description, N'') AS DESCRIPTION, "
                 "CONVERT(NVARCHAR(MAX), content) AS CONTENT, ISNULL(module, N'') AS CATEGORY, "
-                "ISNULL(keywords, N'') AS KEYWORDS "
+                "ISNULL(keywords, N'') AS KEYWORDS, ISNULL(author, N'') AS AUTHOR "
                 "FROM dbo.HRMS_FAQ_SOP WHERE is_active = 1"),
-        "columns": ["ID", "TITLE", "DESCRIPTION", "CONTENT", "CATEGORY", "KEYWORDS"],
+        "columns": ["ID", "TITLE", "DESCRIPTION", "CONTENT", "CATEGORY", "KEYWORDS", "AUTHOR"],
     },
 }
 
@@ -75,3 +77,42 @@ def load_all(table_key):
                       for i, col in enumerate(cols)})
     _cache[table_key] = (now, rows)
     return rows
+
+
+# ── AI 寫入（由 refdata_write 呼叫；寫入者一律為 created_by_ai）──
+
+def distinct_values(table, column):
+    """某欄目前已有的值（驗證 module／category 用）。table、column 由呼叫端寫死，不接受外部輸入。"""
+    cur = mdb._get_conn().cursor()
+    return sorted({r[0] for r in cur.execute(
+        f"SELECT DISTINCT {column} FROM dbo.{table} WHERE {column} IS NOT NULL")})
+
+
+def author_of(table, id_col, author_col, row_id):
+    """回傳該筆的寫入者；查無此筆回 None。"""
+    cur = mdb._get_conn().cursor()
+    r = cur.execute(f"SELECT {author_col} FROM dbo.{table} WHERE {id_col} = ?", (row_id,)).fetchone()
+    return None if r is None else (r[0] or "")
+
+
+def insert_row(table, values, now_cols=()):
+    """values: {欄位: 值}，now_cols 的欄位填 GETDATE()；回傳新 ID。欄位名由呼叫端寫死。"""
+    cols = list(values)
+    marks = ["?"] * len(cols) + ["GETDATE()"] * len(now_cols)
+    cur = mdb._get_conn().cursor()
+    cur.execute(
+        f"SET NOCOUNT ON; INSERT INTO dbo.{table}({','.join(cols + list(now_cols))}) "
+        f"VALUES ({','.join(marks)}); SELECT CAST(SCOPE_IDENTITY() AS INT)",
+        tuple(values[c] for c in cols))
+    new_id = cur.fetchone()[0]
+    invalidate_cache()
+    return new_id
+
+
+def update_row(table, id_col, row_id, values, touch_col):
+    """更新一筆，touch_col 設為 GETDATE()。"""
+    sets = ", ".join(f"{c} = ?" for c in values) + f", {touch_col} = GETDATE()"
+    cur = mdb._get_conn().cursor()
+    cur.execute(f"UPDATE dbo.{table} SET {sets} WHERE {id_col} = ?",
+                tuple(values.values()) + (row_id,))
+    invalidate_cache()

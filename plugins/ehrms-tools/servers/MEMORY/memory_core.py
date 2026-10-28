@@ -267,5 +267,5 @@ def remember(kind, topic, content, keywords="", func_path="", entry_path="",
         out.append(f"入口：`{entry_path}`{m}")
     if sup_ids:
         out.append(f"↺ 已取代舊記憶 {sup_ids}（檢索端不再回傳舊版）")
-    out.append(f"記錄者：{db.created_by()}")
+    out.append(f"記錄者：{db.created_by_ai()}")
     return "\n".join(out)

@@ -23,6 +23,9 @@ LOOKUP_THRESHOLD = 0.30   # 敘述檢索：低於此分不回傳
 
 _KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*-\d+$")
 
+PRECISION_NOTE = ("> 過往 Jira 單的分析經驗，精度較低、僅供參考；"
+                  "引用前須以程式、Wiki 或 FAQ 佐證。")
+
 
 def normalize_key(s):
     """單號正規化：純數字補預設前綴 EHRMSONE-，統一大寫。非單號格式回 None。"""
@@ -119,7 +122,7 @@ def log_case(jira_key, kind, title, root_cause, resolution,
     out = [f"✅ 已記錄（{kind}，紀錄 ID **{new_id}**）{key}【{title}】"]
     if sup_id:
         out.append(f"↺ 已取代舊紀錄 ID {sup_id}（檢索不再回傳舊結論）")
-    out.append(f"記錄者：{mdb.created_by()}・審核狀態：⏳未審核"
+    out.append(f"記錄者：{mdb.created_by_ai()}・審核狀態：⏳未審核"
                f"（根因確認後由人工於 DB 端標記 verified）")
     return "\n".join(out)
 
@@ -141,7 +144,7 @@ def lookup(query, kind=None, top_k=5):
         hits = [r for r in rows if r["key"] == key]
         if not hits:
             return f"# HRMS_JIRA：{key}\n\n（此單尚無結案紀錄）"
-        out = [f"# HRMS_JIRA：{key}"]
+        out = [f"# HRMS_JIRA：{key}", PRECISION_NOTE]
         for r in hits:
             out.extend(_fmt(r))
         return "\n".join(out)
@@ -170,7 +173,7 @@ def lookup(query, kind=None, top_k=5):
     pend = [(sc, r) for sc, r in scored
             if r["review"] != "verified"][:top_k - len(ver)]
 
-    out = [f"# HRMS_JIRA 檢索：{query}"]
+    out = [f"# HRMS_JIRA 檢索：{query}", PRECISION_NOTE]
     if ver:
         out.append("\n## ✅ 已審核案例（根因經人工確認，優先參考）")
         for sc, r in ver:
