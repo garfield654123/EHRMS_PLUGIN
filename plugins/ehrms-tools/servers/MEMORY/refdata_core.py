@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""HRMS_FAQ / HRMS_BULLETIN / HRMS_TASK 共用查詢邏輯（純查詢，AI 不寫入）
+"""HRMS_FAQ / HRMS_FAQ_BULLETIN / HRMS_TASK 共用查詢邏輯（純查詢，AI 不寫入）
 
 三表皆由人工在 DB 端直接維護（人工檢核過的高精度資料），與 AI 自動累積、
 需要去重／supersede／審核狀態的 HRMS_MEMORY、HRMS_JIRA 性質不同：
 - 沒有寫入工具，內容由人工直接 INSERT/UPDATE
-- 沒有 REVIEW_STATUS：內容本來就是人工先審過才寫入
+- 原表雖有 REVIEW_STATUS 欄位，但目前皆為 pending，故查詢時不以審核狀態過濾；引用時不可當作已審核資料
 - 評分器直接重用 memory_core（bigram＋關鍵字比對，作法同 jira_core 對 mc._score 的重用）
 
 task 檢索固定附加提醒：罐頭語法仍須人工確認參數與影響範圍，AI 不可自動執行 SQL。

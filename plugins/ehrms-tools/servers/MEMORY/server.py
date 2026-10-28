@@ -4,7 +4,7 @@
 ① recall / remember：跨單可泛化知識（HRMS_MEMORY）
 ② jira_lookup / jira_log：單一案件結案紀錄（HRMS_JIRA，一單一筆有效紀錄）
 ③ faq_lookup / bulletin_lookup / task_lookup：人工維護的高精度參考資料
-   （HRMS_FAQ／HRMS_BULLETIN／HRMS_TASK，純查詢，AI 不寫入）
+   （HRMS_FAQ／HRMS_FAQ_BULLETIN／HRMS_TASK，直接查原表，純查詢，AI 不寫入）
 """
 import asyncio
 from mcp.server import Server
@@ -148,9 +148,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="bulletin_lookup",
             description=(
-                "查 HRMS_BULLETIN（人工維護的公告：已知問題／版本異動等，非 AI 產生）。"
+                "查 HRMS_FAQ_BULLETIN（人工維護的公告：已知問題／版本異動等，非 AI 產生）。"
                 "查維運單初期與 recall／jira_lookup／faq_lookup 並行呼叫，"
-                "已自動排除未生效／已過期的公告。"
+                "僅包含未刪除且顯示中（IS_DELETE=0、SHOW=1）的公告。"
             ),
             inputSchema={
                 "type": "object",
