@@ -34,7 +34,7 @@ description: 引導安裝及驗證 Claude Code／Codex 共用的 EHRMS 工具包
 | Database | mssql_query：SELECT 1 AS ok | 回傳 ok=1 |
 | Jira | get_user_info，不指定 username | 取得目前登入帳號 |
 | Jira | get_issue_summary，僅用使用者指定單號 | 取得有權限案件的摘要 |
-| Memory | 列舉工具 | 包含 recall、remember、jira_lookup、jira_log、faq_lookup、bulletin_lookup、task_lookup、custom_sa_log、custom_log |
+| Memory | 列舉工具 | 包含 recall、remember、jira_lookup、jira_log、faq_lookup、bulletin_lookup、version_bulletins、task_lookup、custom_sa_log、custom_log |
 | Memory | 有需要才用 faq_lookup 查已知主題 | 查詢成功，空結果也算成功 |
 
 不呼叫寫入工具測試。recall 會更新 HIT_COUNT，不能當作純讀取測試。

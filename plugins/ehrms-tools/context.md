@@ -13,6 +13,7 @@
 | 過往相似案件的根因與解法（過往分析，精度較低，僅供參考） | Jira 結案紀錄 | `jira_lookup` |
 | 怎麼回覆客戶（人工整理） | FAQ | `faq_lookup` |
 | 已知問題、版本異動 | 公告 | `bulletin_lookup` |
+| 回報的錯誤是不是已知版更問題（更新程式、修正版號、適用客戶） | 版更公告（整批列出） | `version_bulletins` |
 | 客戶需求怎麼處理：前置確認、操作路徑或該套哪個 Task、要請客戶補什麼 | SOP | `sop_lookup` |
 | 修改客戶資料的 SQL 範本 | Task 罐頭語法 | `task_lookup` |
 | 資料表、欄位、關聯 | 資料字典 | DB MCP `search_tables`、`get_table_columns` |
@@ -27,7 +28,7 @@
 | 案件摘要／進度 | 只讀單，整理訴求、進度、下一步 |
 | 資料查詢／調整／解鎖 | `sop_lookup`（前置確認與該套哪個 Task）→ `task_lookup` |
 | 操作／規則詢問 | `wiki_lookup` → `faq_lookup`（或 `sop_lookup` 取操作路徑）→ `recall` |
-| 疑似異常 | `recall`＋`jira_lookup`（並行）→ `wiki_lookup` 確認原則 → 資料不足時 `sop_lookup` 列出要請客戶補的資料 → 仍不足才讀程式 |
+| 疑似異常 | `recall`＋`jira_lookup`＋`version_bulletins`（並行）→ `wiki_lookup` 確認原則 → 資料不足時 `sop_lookup` 列出要請客戶補的資料 → 仍不足才讀程式 |
 
 `wiki_lookup` 先用 query 搜尋，需要原文再用 `page`＋`section`（例：`R7`、`程式地圖`、`上半`）。
 

@@ -38,7 +38,7 @@ EXPECTED_TOOLS = {
     },
     "ehrms-memory": {
         "recall", "remember", "jira_lookup", "jira_log", "faq_lookup",
-        "bulletin_lookup", "task_lookup", "sop_lookup", "wiki_lookup",
+        "bulletin_lookup", "version_bulletins", "task_lookup", "sop_lookup", "wiki_lookup",
         "faq_log", "task_log", "sop_log",
         "custom_sa_log", "custom_log",
     },

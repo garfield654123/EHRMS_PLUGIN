@@ -5,6 +5,7 @@
 ② jira_lookup / jira_log：單一案件結案紀錄（HRMS_JIRA，一單一筆有效紀錄）
 ③ faq_lookup / bulletin_lookup / task_lookup / sop_lookup：人工維護為主的參考資料
    （HRMS_FAQ／HRMS_FAQ_BULLETIN／HRMS_TASK／HRMS_FAQ_SOP，直接查原表）
+   version_bulletins：整批列出版更公告（不做相似度篩選），比對已知版更問題用
    faq_log / task_log / sop_log：AI 寫入口，寫入者記為「使用者(AI)」，不可改人工資料
 ④ wiki_lookup：系統原則與大規則（HRMS_WIKI，由 eHRMS-Wiki 發佈，純查詢）
 伺服器說明（instructions）載入 plugin 根目錄的 context.md，作為常駐的知識庫使用說明。
@@ -179,6 +180,15 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["query"],
             },
+        ),
+        Tool(
+            name="version_bulletins",
+            description=(
+                "整批列出 HRMS_FAQ_BULLETIN 裡所有有效的版更公告（類型：版本更新／version update／規格說明），"
+                "含已知版更問題、更新程式連結、修正版號、適用版本或客戶名單。不做相似度篩選，"
+                "用來比對使用者回報的錯誤／異常是不是已知版更問題；資料調整需求或單純操作詢問不需要呼叫。"
+            ),
+            inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="task_lookup",
@@ -397,6 +407,8 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
     if name == "bulletin_lookup":
         return _text(rc.lookup(
             "bulletin", arguments["query"], arguments.get("category"), arguments.get("top_k", 5)))
+    if name == "version_bulletins":
+        return _text(rc.version_bulletins())
     if name == "task_lookup":
         return _text(rc.lookup(
             "task", arguments["query"], None, arguments.get("top_k", 5)))
