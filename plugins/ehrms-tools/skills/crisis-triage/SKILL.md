@@ -1,11 +1,11 @@
 ---
 name: crisis-triage
-description: EHRMS Jira 維運單（Crisis 單）查單與除錯流程規範。重要規則：EHRMS 是架在客戶端的地端系統，公司內 DB 沒有客戶資料，查維運單時禁止用 DB MCP 找客戶資料/測試資料。Use when the user asks to 查/看 a Jira ticket (e.g. "幫我看 32543", "查 EHRMSONE-XXXXX"), when the issue type is Crisis - Level A/B/C, or when debugging a customer-reported (客戶回報/維運) problem.
+description: EHRMS Jira 維運單（Crisis 單）需求分析與處理分流。先辨識資料調整、操作／規則詢問或疑似異常，不預設程式缺陷。重要規則：EHRMS 是架在客戶端的地端系統，公司內 DB 沒有客戶資料，查維運單時禁止用 DB MCP 找客戶資料/測試資料。Use when the user asks to 查/看 a Jira ticket (e.g. "幫我看 32543", "查 EHRMSONE-XXXXX"), when the issue type is Crisis - Level A/B/C, or when debugging a customer-reported (客戶回報/維運) problem.
 ---
 
 執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
 
-# EHRMS 維運單（Crisis 單）查單與除錯流程
+# EHRMS 維運單（Crisis 單）需求分析與處理流程
 
 ## 核心規則（最優先）
 
@@ -15,33 +15,39 @@ description: EHRMS Jira 維運單（Crisis 單）查單與除錯流程規範。�
 
 - ❌ **禁止**用 DB MCP 查客戶的公司、員工、假勤、行事曆、薪資等業務資料——必然查不到，浪費時間且可能誤導分析方向
 - ❌ **禁止**用 DB MCP 嘗試「找測試資料」來重現客戶問題
-- ✅ 需要資料佐證時 → 在診斷報告中列出「**請客戶端 / CS 協助執行的查詢 SQL**」，由有權限的人在客戶環境執行後回填結果
+- ✅ 需要資料佐證時 → 在處理建議中列出「**請客戶端 / CS 協助執行的查詢 SQL**」，由有權限的人在客戶環境執行後回填結果
 - ✅ DB MCP 僅可用於與客戶資料無關的用途：查表結構定義（HRMS_TABLES、get_table_columns）、hrms_sys_rule、schema 關聯分析
 
 例外：使用者**明確要求**查 DB 時才使用（例如指名「用 DB MCP 查」或問題明確屬於自家環境資料）。
 
-`faq_lookup`／`bulletin_lookup`／`task_lookup` 查的是 HRMS_FAQ／HRMS_BULLETIN／HRMS_TASK——
-**人工整理維護的自家維運知識庫**，不是客戶資料，不受上述禁令限制（同 `hrms_sys_rule` 的既有例外）。
+`wiki_lookup`／`faq_lookup`／`bulletin_lookup`／`sop_lookup`／`task_lookup` 查的是自家維運知識庫
+（HRMS_WIKI／HRMS_FAQ／HRMS_BULLETIN／HRMS_FAQ_SOP／HRMS_TASK），不是客戶資料，不受上述禁令限制（同 `hrms_sys_rule` 的既有例外）。
+各來源用途、信任順序與寫回規則見 ehrms-memory 常駐的知識庫使用說明（context.md），本流程不重複。
 
 ## 標準流程
 
 ```
-取單 → recall＋jira_lookup＋faq_lookup＋bulletin_lookup（四路並行）→ 判斷單型
-     → 讀附件截圖 → 追碼 →（需修正資料才查 task_lookup）→ 診斷報告（前置 remember＋jira_log）→ 停止等確認
+取單與最新進度 → 辨識本次需求、讀相關附件 → 依需求查知識／歷史案件
+  ├─ 資料查詢／調整／解鎖：核對範圍與現況 → sop_lookup（前置確認、該套哪個 Task）→ task_lookup 範本 → 處理建議
+  ├─ 操作／規則詢問：wiki_lookup → faq_lookup／sop_lookup（操作路徑）→ 操作或規則說明
+  └─ 疑似異常：確認異常事實與需要釐清的問題 → wiki_lookup 確認原則 → 資訊不足時 sop_lookup 列出要請客戶補的資料 → 必要時追碼 → 分析／修復建議
+完成本次範圍 → 僅沉澱已確認知識 → 依需求交付
 ```
+
+**維運單不等於 bug。** 依使用者及客戶最新訴求、既有處理結果決定範圍。Crisis、Fatal、標題中的「問題」或歷史 bug 都不直接證明程式缺陷。只要求資料調整時，不擴成計算邏輯除錯；混合需求分開處理，有新異常證據且本次需要排查才展開。
 
 ### 1. 取單
 
 - 單號只給數字時補預設前綴 `EHRMSONE`
 - `get_issue` 一次到位：回傳精簡欄位＋完整描述＋**最新 10 筆評論**（新→舊）；需要更早的討論再用 `get_comments` 調大 `limit`
-- 取單後立刻並行呼叫（帶問題敘述）：ehrms-memory 的 `recall`（過往沉澱的系統知識與程式入口）＋ `jira_lookup`（過往相似案件的根因與解法）＋ `faq_lookup`（人工維護的常見問題）＋ `bulletin_lookup`（人工維護的公告，已自動排除過期／未生效）
-- `jira_lookup` 相似結果分兩層：**✅已審核**（根因經人工確認）可直接當診斷參考並在報告中引用；**⏳未審核** 僅供方向參考，引用前須自行追碼驗證，報告中須註明「未經審核」
-- `faq_lookup`／`bulletin_lookup` 是人工檢核過的高精度資料，命中且能完全解釋問題時可直接引用其解答加速結案；未命中或無法完全解釋則照常繼續判斷單型、追碼
-- 從範本欄位雜訊中萃取：標題、描述、issuetype、狀態、客戶名稱、附件清單
+- 辨識需求後，以本次訴求與處理範圍並行呼叫（資料調整用解鎖／修改資料等敘述，不預設 bug）：ehrms-memory 的 `recall`（過往沉澱的系統知識與程式入口）＋ `jira_lookup`（過往相似案件的根因與解法）＋ `faq_lookup`（人工維護的常見問題）＋ `bulletin_lookup`（人工維護的公告，已自動排除過期／未生效）
+- `jira_lookup` 是過往 Jira 單的分析經驗，整體精度較低、僅供參考。相似結果分兩層：**✅已審核**（根因經人工確認）可優先參考並在報告中引用；**⏳未審核** 僅供方向參考，引用前須以相關證據自行驗證（不一律追碼），報告中須註明「未經審核」
+- `faq_lookup`／`bulletin_lookup` 是人工檢核過的高精度資料（標 🤖 AI 撰寫者除外），命中且能完全解釋問題時可直接引用其解答加速結案；未命中時仍依需求分流；不能因查不到 FAQ 就自動追碼
+- 從範本欄位雜訊中萃取：本次希望完成的事項、對象／範圍、最新處理進度、標題、描述、issuetype、狀態、客戶名稱及相關附件
 
-### 2. 判斷單型
+### 2. 確認客戶情境與需求
 
-優先用 `get_issue` 回傳的**結構化欄位**判斷，不要從描述範本文字猜：
+以下結構化欄位用來確認客戶情境與資料存取限制，不用來判定 bug；實際需求須讀描述及最新留言：
 
 | 依據（get_issue 回傳欄位） | 判定 | DB MCP |
 |---|---|---|
@@ -49,31 +55,36 @@ description: EHRMS Jira 維運單（Crisis 單）查單與除錯流程規範。�
 | `category`=維運、`source`=客戶、或 `customer` 有客戶名稱 | 維運單 | 禁用（見核心規則） |
 | 上述欄位皆非客戶情境（內部開發/測試單、自家環境問題） | 一般單 | 可使用 |
 
-- `severity`（嚴重度，如 Fatal）納入報告的風險評估
-- `customer`（客戶名稱）寫進診斷報告開頭，並用於「請 CS/客戶端執行」的指引
+- `severity`（嚴重度，如 Fatal）是案件標記，不代表已確認程式錯誤或實際影響；只在與處理決策相關時說明
+- `customer`（客戶名稱）寫進需求摘要，並用於「請 CS/客戶端執行」的指引
 
 ### 3. 附件截圖
 
 - 描述只有一兩句話時，重點通常在截圖 → `get_attachment`（預設 auto）：圖片直接以影像回傳可當場判讀；非圖片會存到本地，再用 Read 開啟
 - 常見錯誤畫面格式「發生時間/狀況描述」＝ VB6 `ErrMsg(ERR)` 輸出，代表後端 VB6 runtime 錯誤
 
-### 4. 追碼
+### 4. 按需求決定是否追碼
 
+- 疑似異常需要排查原因，或操作／規則／資料處理需核對特定邏輯時，才追碼；先明確本次要回答的問題。資料調整不必先證明 bug，也不為輸出格式補程式碼。
 - 入口優先採 `recall` 命中的 Engineer 記憶（entry_path）；沒有命中時以功能關鍵字 Grep 原始碼定位入口，再沿呼叫鏈追蹤
 - Big5 的 .cls 先轉 UTF-8 暫存檔再搜尋中文訊息（直接 Grep 中文搜不到）
-- 診斷證據來源＝**截圖 + 程式碼**，不是 DB 資料
+- 證據可來自案件內容、截圖、既有操作紀錄、客戶回填的查詢結果及必要的程式碼；公司 DB 沒有客戶業務資料，不得拿公司資料推論客戶現況。程式事實與本案根因須分開。
 
 ### 5. 需修正資料時查罐頭語法
 
-- 診斷結論為「**需要修正客戶資料**」才呼叫 `task_lookup`（情境敘述）——查 HRMS_TASK 有無現成罐頭語法可套用
-- 有命中：在修復方案中引用 SQL 範本、參數、`RISK_LEVEL`、`PRECAUTIONS`，並保留「仍須人工確認參數與影響範圍、AI 不可自動執行」的提醒（`task_lookup` 已固定附加）
+- 先 `sop_lookup` 看該類需求有無 SOP（例：解鎖假勤要先確認是否已計薪），依 SOP 的前置確認與指定 Task 處理
+- 客戶明確要求資料調整／解鎖，或分析確認需要修正資料時，即可呼叫 `task_lookup`（資料處理情境）；不以診斷出 bug 為前提——查 HRMS_TASK 有無現成罐頭語法可套用
+- 有命中：在資料處理建議中引用 SQL 範本、參數、`RISK_LEVEL`、`PRECAUTIONS`，並保留「仍須人工確認參數與影響範圍、AI 不可自動執行」的提醒（`task_lookup` 已固定附加）
 - 無命中：維持原本個案 SQL 建議流程（請 CS/客戶端協助執行）
 
 ### 6. 輸出與收尾
 
-- 依目前平台的專案規範（Claude Code：CLAUDE.md；Codex：AGENTS.md）輸出診斷報告；未另訂格式時使用 5 區塊（問題摘要/問題程式碼/修復方案/驗證步驟/風險評估）
+- 先說明需求、目前進度與下一步，依需求選格式，不固定五區塊。資料調整聚焦對象／範圍、欲改內容、處理方式與結果確認；操作／規則詢問直接回答；疑似異常區分事實與待驗證方向。
+- 僅已確認程式缺陷且需提出修復方案時，才用問題摘要／問題程式碼／修復方案／驗證步驟／風險評估。不為湊模板追碼或建立 bug 假設。
 - 需要客戶資料佐證的部分，附上 SQL 與說明請 CS/客戶端執行
-- 報告輸出前沉澱兩件事（互補、各寫各的）：
-  1. **結案紀錄** → 先 `jira_lookup(單號)` 查重：無紀錄 → `jira_log(kind="Crisis", jira_key=單號, title=一句話摘要, root_cause=根因, resolution=解決方式, changed_files=有改程式才填（repo 相對路徑，如 `VB/EHRMS/xx.cls :: 函式`，勿用 C:\ 開頭的本機路徑）, keywords=3~8 個)`；已有紀錄且本次結論不同 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫
+- 輸出前依已確認證據決定是否沉澱，不為完成查單而強寫根因或結案紀錄：
+  1. **案件原因或處理依據已確認才記錄** → 資料調整記錄需求與處理依據，不捏造 bug；尚未執行／驗證要明示。先 `jira_lookup(單號)` 查重：無紀錄 → `jira_log(kind="Crisis", jira_key=單號, title=一句話摘要, root_cause=根因, resolution=解決方式, changed_files=有改程式才填（repo 相對路徑，如 `VB/EHRMS/xx.cls :: 函式`，勿用 C:\ 開頭的本機路徑）, keywords=3~8 個)`；已有紀錄且本次結論不同 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫
   2. **可泛化知識** → 跨單通用的系統行為或程式入口才用 `remember`（System/Engineer 兩型；訂正帶 `supersedes=舊ID`）
-- 輸出後停止等使用者確認，不可直接改碼
+  3. **補齊參考資料**（查無才寫，`refs` 必填）：可直接回覆客戶的問答 → `faq_log`；同類客戶需求的處理步驟已確認 → `sop_log`；已在客戶端實際用某段 SQL 修正並確認無誤 → 先完成 1. 的 `jira_log`，再 `task_log`。人工資料不可修改，有出入時在回覆中提出
+  - 有寫入時，在輸出中列出新增或更新的 ID
+- 查單／分析完成不自動改碼、執行資料更新或送出 Jira 評論；承接使用者既有授權，需要新增授權時才確認具體方案。
