@@ -23,9 +23,6 @@ TABLE_CONF = {
 
 LABELS = {"faq": "FAQ", "bulletin": "公告", "task": "罐頭語法", "sop": "SOP"}
 
-# SOP 類型以標題前綴區分（HRMS_FAQ_SOP 沒有分類欄位）
-SOP_KINDS = {"流程": "【流程】", "上版": "【上版】", "補件": "【補件】"}
-
 TASK_DISCLAIMER = ("⚠️ 以上為人工整理之罐頭語法範本，仍須人工確認參數與實際影響範圍後才可執行；"
                     "AI 不可自動執行此 SQL。")
 
@@ -64,12 +61,9 @@ def _fmt(table_key, r, score=None):
     return lines
 
 
-def lookup(table_key, query, category=None, top_k=5, kind=None):
+def lookup(table_key, query, category=None, top_k=5):
     """共用查詢：query 與各表 topic/content 做 bigram＋關鍵字相似度比對，
-    回傳 top_k 筆（依相似度排序）。category 可選（限定分類）。
-    kind 僅 sop 使用：流程／上版／補件，依標題前綴篩選。"""
-    if kind and kind not in SOP_KINDS:
-        return f"⚠️ kind 只能是 {' / '.join(SOP_KINDS)}。"
+    回傳 top_k 筆（依相似度排序）。category 可選（限定分類）。"""
     if table_key not in TABLE_CONF:
         return f"⚠️ 未知的資料類型：{table_key}"
     if not db.db_enabled():
@@ -88,8 +82,6 @@ def lookup(table_key, query, category=None, top_k=5, kind=None):
     scored = []
     for r in rows:
         if category and (r.get("category") or "").strip() != category.strip():
-            continue
-        if kind and not (r.get("title") or "").startswith(SOP_KINDS[kind]):
             continue
         topic = r.get(conf["topic_field"], "") or ""
         content = " ".join(r.get(f, "") or "" for f in conf["content_fields"])

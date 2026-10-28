@@ -7,7 +7,7 @@ EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**ehrms-memory 團隊
 | 新增 | 說明 |
 |---|---|
 | `wiki_lookup` | 查 EHRMS Wiki（HRMS_WIKI，讀 `vwHRMS_WIKI_SEARCH`）。給 `query` 搜尋頁面與命中規則（Rn）；給 `page`（主題代碼／路徑／標題）＋`section`（`R7`、章節名、`上半`／`下半`／`全文`）讀原文。規則引用的記憶若已被取代，自動標示新編號；未給 `customer_code` 不回傳客製頁 |
-| `sop_lookup` | 查 HRMS_FAQ_SOP；`kind` 可限定 補件／流程／上版（依標題前綴【補件】【流程】【上版】） |
+| `sop_lookup` | 查 HRMS_FAQ_SOP（客戶需求處理 SOP：前置確認、操作路徑或套用的 Task、需請客戶補的資料、處理後提醒） |
 | `context.md` | 知識庫使用說明（知識來源、查詢順序、寫回規則、必守限制）。ehrms-memory 以伺服器說明（instructions）送出，啟用插件即常駐載入，不需另外設定 |
 
 Wiki 正本在 104corp/eHRMS-Wiki，由指定工程師發佈到 HRMS_WIKI；格式見 EHRMS_GIT `docs/knowledge-wiki/Wiki頁面撰寫規範.md`。

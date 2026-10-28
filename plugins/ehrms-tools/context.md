@@ -1,6 +1,8 @@
 # EHRMS 知識庫使用說明（ehrms-tools）
 
-處理 EHRMS 問題（Jira 維運單、規則詢問、除錯）時，依本說明查知識與寫回。詳細流程見 SOP（`sop_lookup`）。
+處理 EHRMS 問題（Jira 維運單、規則詢問、除錯）時，依本說明查知識與寫回。
+
+工作流程依 skill：處理維運單 → `crisis-triage`；修改程式、上版 → `bug-fix`。
 
 ## 知識來源
 
@@ -11,7 +13,7 @@
 | 過往相似案件的根因與解法 | Jira 結案紀錄 | `jira_lookup` |
 | 怎麼回覆客戶（人工整理） | FAQ | `faq_lookup` |
 | 已知問題、版本異動 | 公告 | `bulletin_lookup` |
-| 資料不足時要請客戶／顧問補什麼；團隊流程（維運、上版） | SOP | `sop_lookup`（kind：補件／流程／上版） |
+| 客戶需求怎麼處理：前置確認、操作路徑或該套哪個 Task、要請客戶補什麼 | SOP | `sop_lookup` |
 | 修改客戶資料的 SQL 範本 | Task 罐頭語法 | `task_lookup` |
 | 資料表、欄位、關聯 | 資料字典 | DB MCP `search_tables`、`get_table_columns` |
 | Jira 單內容 | Jira | Jira MCP `get_issue` |
@@ -23,9 +25,9 @@
 | 需求 | 查詢 |
 |---|---|
 | 案件摘要／進度 | 只讀單，整理訴求、進度、下一步 |
-| 資料查詢／調整／解鎖 | `task_lookup`；SQL 交付依 SOP【流程】客戶端維運 SQL 交付規範 |
-| 操作／規則詢問 | `wiki_lookup` → `faq_lookup` → `recall` |
-| 疑似異常 | `recall`＋`jira_lookup`（並行）→ `wiki_lookup` 確認原則 → 資料不足時 `sop_lookup(kind="補件")` 列出要請客戶補的資料 → 仍不足才讀程式 |
+| 資料查詢／調整／解鎖 | `sop_lookup`（前置確認與該套哪個 Task）→ `task_lookup` |
+| 操作／規則詢問 | `wiki_lookup` → `faq_lookup`（或 `sop_lookup` 取操作路徑）→ `recall` |
+| 疑似異常 | `recall`＋`jira_lookup`（並行）→ `wiki_lookup` 確認原則 → 資料不足時 `sop_lookup` 列出要請客戶補的資料 → 仍不足才讀程式 |
 
 `wiki_lookup` 先用 query 搜尋，需要原文再用 `page`＋`section`（例：`R7`、`程式地圖`、`上半`）。
 

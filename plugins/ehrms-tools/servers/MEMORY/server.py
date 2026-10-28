@@ -197,17 +197,15 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="sop_lookup",
             description=(
-                "查 HRMS_FAQ_SOP（團隊作業 SOP，人工維護）。三類："
-                "補件＝某類問題資料不足時要請客戶／顧問補哪些資料；"
-                "流程＝維運單處理與客戶端 SQL 交付等步驟；上版＝程式修改到正式釋出的步驟與規範。"
-                "疑似異常但資訊不足時，先用 kind=補件 查詢，再向使用者列出需補的資料。"
+                "查 HRMS_FAQ_SOP（客戶需求處理 SOP，人工維護）。一種客戶需求一筆："
+                "前置確認（例：解鎖假勤前先確認是否已計薪）、處理方式（操作路徑或套用哪個 Task）、"
+                "需要客戶補的資料、處理後的提醒。客戶提出資料調整或操作需求、"
+                "或疑似異常但資訊不足時呼叫。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "問題或作業敘述（中文）"},
-                    "kind": {"type": "string", "enum": ["補件", "流程", "上版"],
-                             "description": "只查某一類（可選）"},
+                    "query": {"type": "string", "description": "客戶需求或問題敘述（中文）"},
                     "top_k": {"type": "integer", "description": "回傳筆數，預設 3"},
                 },
                 "required": ["query"],
@@ -332,8 +330,7 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
             "task", arguments["query"], None, arguments.get("top_k", 5)))
     if name == "sop_lookup":
         return _text(rc.lookup(
-            "sop", arguments["query"], None, arguments.get("top_k", 3),
-            kind=arguments.get("kind")))
+            "sop", arguments["query"], None, arguments.get("top_k", 3)))
     if name == "wiki_lookup":
         return _text(wc.lookup(
             query=arguments.get("query"), page=arguments.get("page"),

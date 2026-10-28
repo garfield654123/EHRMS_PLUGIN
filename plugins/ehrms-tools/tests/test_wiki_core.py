@@ -141,12 +141,12 @@ class LookupTests(unittest.TestCase):
 class SopLookupTests(unittest.TestCase):
     def setUp(self):
         rows = [
-            {"id": 1, "title": "【補件】計算假勤／加班時數有誤", "description": "處理時數問題",
-             "content": "# 計算假勤／加班時數有誤\n\n## 必要資料\n1. 行事曆設定", "category": "M1",
-             "keywords": "假勤,加班,時數"},
-            {"id": 2, "title": "【上版】程式修改到正式釋出", "description": "分支到 PR",
-             "content": "1. 從最新 master 拉分支", "category": "COMMON",
-             "keywords": "上版,分支,PR,加班"},
+            {"id": 1, "title": "計算假勤／加班時數有誤", "description": "處理時數問題",
+             "content": "# 計算假勤／加班時數有誤\n\n## 需要客戶補的資料\n1. 行事曆設定",
+             "category": "M1", "keywords": "假勤,加班,時數"},
+            {"id": 2, "title": "客戶要求解鎖假勤", "description": "解鎖前先確認是否已計薪",
+             "content": "## 前置確認\n1. 是否已計薪\n\n## 處理方式\n- 加班：Task #221",
+             "category": "M1", "keywords": "解鎖,已計薪,假勤"},
         ]
         patches = [mock.patch.object(refdata_core.db, "db_enabled", return_value=True),
                    mock.patch.object(refdata_core.db, "load_all", return_value=rows)]
@@ -154,14 +154,14 @@ class SopLookupTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def test_kind_filter(self):
-        out = refdata_core.lookup("sop", "加班時數算錯", kind="補件")
-        self.assertIn("【補件】計算假勤", out)
-        self.assertNotIn("【上版】", out)
-        self.assertIn("## 必要資料", out)
+    def test_returns_full_content(self):
+        out = refdata_core.lookup("sop", "客戶要解鎖已計薪的假勤")
+        self.assertIn("客戶要求解鎖假勤", out)
+        self.assertIn("Task #221", out)
 
-    def test_invalid_kind(self):
-        self.assertIn("kind 只能是", refdata_core.lookup("sop", "加班", kind="其他"))
+    def test_category_filter(self):
+        out = refdata_core.lookup("sop", "加班時數算錯", category="M2")
+        self.assertIn("無相符SOP", out)
 
 
 if __name__ == "__main__":

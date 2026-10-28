@@ -43,7 +43,7 @@ TABLES = {
         "columns": ["ID", "TASK_NAME", "SCENARIO", "SQL_TEMPLATE", "PARAMS",
                     "AFFECTED_TABLE", "RISK_LEVEL", "PRECAUTIONS", "KEYWORDS"],
     },
-    # sop <- HRMS_FAQ_SOP（團隊作業流程與排查補件清單；類型以標題前綴【流程】【上版】【補件】區分）
+    # sop <- HRMS_FAQ_SOP（客戶需求處理 SOP：前置確認、操作路徑或 Task、需請客戶補的資料）
     "sop": {
         "sql": ("SELECT sop_id AS ID, title AS TITLE, ISNULL(description, N'') AS DESCRIPTION, "
                 "CONVERT(NVARCHAR(MAX), content) AS CONTENT, ISNULL(module, N'') AS CATEGORY, "
