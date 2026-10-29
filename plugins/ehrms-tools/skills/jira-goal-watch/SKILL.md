@@ -29,6 +29,20 @@ description: 僅供本機排程（Windows Task Scheduler，每天 02:00）headle
 - **不做主動失敗通知**——排程失敗只留在本機 log／Task Scheduler 執行紀錄，不主動推播。
 - **`$ARGUMENTS`（goal 文字）用途**：排程呼叫時通常不帶參數，直接套用本文件的固定流程。若使用者手動帶了自訂 goal 文字，可用來臨時調整本次的複查角度／範圍，但**不可放寬**上述安全限制（速率上限、留言標記、唯讀原則等一律優先於 goal 內容）。
 
+## 步驟 0：一次載入所有工具（先做，不可省略）
+
+MCP 工具是延遲載入的，沒載入就等於沒有這個工具；過去曾因只載入 recall／jira_lookup／faq_lookup／bulletin_lookup，
+而整晚沒查 Wiki、SOP、版更公告。開始前用**一次** ToolSearch 載入本流程會用到的全部工具：
+
+```
+select:mcp__plugin_ehrms-tools_EHRMS-jira-mcp__search_issues,mcp__plugin_ehrms-tools_EHRMS-jira-mcp__get_issue,mcp__plugin_ehrms-tools_EHRMS-jira-mcp__get_comments,mcp__plugin_ehrms-tools_EHRMS-jira-mcp__get_attachment,mcp__plugin_ehrms-tools_EHRMS-jira-mcp__add_comment,mcp__plugin_ehrms-tools_ehrms-memory__wiki_lookup,mcp__plugin_ehrms-tools_ehrms-memory__recall,mcp__plugin_ehrms-tools_ehrms-memory__jira_lookup,mcp__plugin_ehrms-tools_ehrms-memory__faq_lookup,mcp__plugin_ehrms-tools_ehrms-memory__sop_lookup,mcp__plugin_ehrms-tools_ehrms-memory__task_lookup,mcp__plugin_ehrms-tools_ehrms-memory__bulletin_lookup,mcp__plugin_ehrms-tools_ehrms-memory__version_bulletins,mcp__plugin_ehrms-tools_ehrms-database__get_table_columns,mcp__plugin_ehrms-tools_ehrms-database__search_tables,mcp__plugin_ehrms-tools_ehrms-database__mssql_query
+```
+
+- plugin 的 DB MCP 沒連上時，改載入 `mcp__ehrms-database__get_table_columns`／`search_tables`／`mssql_query`（同一個資料庫）。
+- **ehrms-memory 沒連上**（知識工具載入不到）：Story 分支照常（只靠 git）；Crisis 分支一律不留言，
+  記 `action="skipped_inconclusive"`，note 寫「ehrms-memory 未連線，未查知識」。沒查知識就留言等於只憑程式猜。
+- 兩個 DB MCP 都沒連上：需要查詢包的單不留言（欄位無法驗證），記 `skipped_inconclusive` 並註明原因。
+
 ## 步驟 1：取得候選單清單
 
 ```
@@ -76,12 +90,25 @@ ORDER BY updated ASC
 
 > 本分支的目標是「儘可能精準分析」：**結論必須有證據（程式位置／FAQ／截圖），需要客戶端資料時要事先備好查詢語法**。過去只憑評論與描述做三選一分類，結論流於含糊（見 `C:\D\JIRA_AI` skip_log 統計），因此追碼為硬性步驟，不可省略。
 
-### 5.1 取單與快篩（並行呼叫）
+### 5.1 讀單 → 判斷需求 → 依需求查知識
 
-1. `get_issue`（含最新評論；結構化欄位 `customer`／`severity`／`category` 一併記下）。**先讀最新留言確認目前進度**：工程師已處理完（例如留言「修改完畢」、狀態 CS CONFIRM）時，不再分析原因，記 `action="skipped_unchanged"`。
-2. 同時以問題敘述呼叫 ehrms-memory：`wiki_lookup`（系統原則與規則）、`recall`（系統知識與 Engineer 入口）、`jira_lookup`（過往相似案，⏳未審核者僅供方向、須自行驗證）、`faq_lookup`、`sop_lookup`（客戶需求的處理 SOP）。
-   疑似異常（回報錯誤、結果不符、功能無法使用）時另呼叫 `version_bulletins` 整批比對已知版更問題。
-3. 有圖片附件用 `get_attachment` 判讀；**影片（mp4 等）無法判讀**，不猜，於日誌 note 註明「僅有影片」。描述裡有 `[image: …]` 但附件清單沒有這張圖時，日誌 note 註明「內嵌圖片無法讀取」，不可假設圖片內容。
+查詢順序與 FAQ_web AI 助理一致，都以 ehrms-memory 的知識庫使用說明（plugin 根目錄 `context.md`「依需求決定查詢順序」）為準。
+
+1. **讀單**：`get_issue`（含最新評論；結構化欄位 `customer`／`severity`／`category` 一併記下）。**先讀最新留言確認目前進度**：工程師已處理完（例如留言「修改完畢」、狀態 CS CONFIRM）時，不再分析原因，記 `action="skipped_unchanged"`。
+   有圖片附件用 `get_attachment` 判讀；**影片（mp4 等）無法判讀**，不猜，於日誌 note 註明「僅有影片」。描述裡有 `[image: …]` 但附件清單沒有這張圖時，日誌 note 註明「內嵌圖片無法讀取」，不可假設圖片內容。
+2. **判斷本次需求**（維運單不等於 bug），依下表查知識；表中的工具是**必查**，彼此獨立的可並行：
+
+   | 需求 | 判斷依據 | 必查（依序） |
+   |---|---|---|
+   | 資料調整 | 請協助修改／更正／補登／刪除／解鎖資料、調整參數 | `sop_lookup`（前置確認與該套哪個 Task）→ `task_lookup` |
+   | 操作／規則詢問 | 問怎麼操作、為什麼這樣算 | `wiki_lookup` → `faq_lookup`＋`sop_lookup` → `recall` |
+   | 疑似異常 | 回報錯誤訊息、結果不符、功能無法使用 | `recall`＋`jira_lookup`＋`version_bulletins`（並行）→ `wiki_lookup` 確認原則 → `faq_lookup` → 資料不足時 `sop_lookup` 列出要請客戶補的資料 → 追碼（5.3） |
+   | 新功能需求 | 要現有系統沒有的功能 | `wiki_lookup`＋`faq_lookup`（確認是否已有功能） |
+
+   `jira_lookup` 的過往案件⏳未審核者僅供方向，須自行驗證。`wiki_lookup` 先用 query 搜尋，需要原文再用 `page`＋`section`。
+   一張單同時有多種需求時，各自依表查。
+3. **客製檢查（每張 Crisis 單都做，不論需求類型）**：與 AI 助理每次查單都比對客製相同。用 `customer` 欄位的統編（或標題開頭的公司名）以 `git -C C:/D/CUSTOM_GIT branch -a` 找客戶分支，有分支再列出客製檔案（指令見 5.3「客製檢查」）。是否在留言標示，依 5.3 的對應規則判斷。
+4. 實際呼叫了哪些知識工具，記到日誌的 `queried` 欄位（步驟 6），供 5.6 自我檢核與事後追查。
 
 ### 5.2 先判斷單的性質，再分類（每一類都要有具體依據）
 
@@ -111,7 +138,7 @@ Jira 的 issuetype（Crisis - Level C 等）與嚴重度（Fatal 等）分不出
 - **入口**：沒有錯誤訊息時，優先採 `recall` 命中的 Engineer `entry_path`；沒有才以功能關鍵字 Grep 定位，比照 `crisis-triage` 步驟 4。Big5 的 `.cls` 先以 PowerShell codepage 950 讀出再搜尋中文。
 - **呼叫鏈**：ASP → VB6 → SP/View/Function，追到能說明行為的那一層。
 - **SP/View/Function 定義**：先查 repo（`script/StoredProcedure`、`script/View`、`script/Function`）；repo 沒有、或版本可疑（例如只有舊版同名系列）時，改用 DB MCP 讀取物件定義（見下方「DB 使用限制的例外」）。
-- **客製檢查**：用 `customer` 欄位的統編（或標題開頭的公司名）以 `git -C C:/D/CUSTOM_GIT branch -a` 找客戶分支（命名為「統編_代號_公司名」），有分支再用 `git -C C:/D/CUSTOM_GIT -c core.quotepath=off ls-tree -r --name-only origin/<分支>` 列出客製檔案。**只有在上一步定位到的程式檔（或同功能的程式）出現在客製檔案中時**，才在留言標示「⚠ 可能為客製功能」並以客製分支的程式為準（`git -C C:/D/CUSTOM_GIT show <分支>:<路徑>` 讀取）；對不上或查無分支時留言不提客製（客製資料不完整，查不到不代表沒有客製）。**排程環境一律唯讀、不切換分支，禁止 `git checkout`**（CUSTOM_GIT 是共用工作目錄）。
+- **客製檢查**（每張 Crisis 單都做，見 5.1 第 3 點）：用 `customer` 欄位的統編（或標題開頭的公司名）以 `git -C C:/D/CUSTOM_GIT branch -a` 找客戶分支（命名為「統編_代號_公司名」），有分支再用 `git -C C:/D/CUSTOM_GIT -c core.quotepath=off ls-tree -r --name-only origin/<分支>` 列出客製檔案。**只有在上一步定位到的程式檔（或同功能的程式）出現在客製檔案中時**，才在留言標示「⚠ 可能為客製功能」並以客製分支的程式為準（`git -C C:/D/CUSTOM_GIT show <分支>:<路徑>` 讀取）；對不上或查無分支時留言不提客製（客製資料不完整，查不到不代表沒有客製）。**排程環境一律唯讀、不切換分支，禁止 `git checkout`**（CUSTOM_GIT 是共用工作目錄）。
 - 結論須具體到「檔案::函式（行）」，不可只寫模組名稱。
 
 ### 5.4 需客戶端資料時：預先備好查詢包
@@ -156,7 +183,19 @@ SQL（唯讀 SELECT，MSSQL 2008 相容；不使用 @ 變數，條件直接寫�
 建議下一步：…（程式缺陷時建議轉 Story）
 ```
 
-呼叫 `add_comment`（dry-run 模式改為只寫日誌，不呼叫）。
+### 5.6 留言前自我檢核（全部通過才可呼叫 `add_comment`）
+
+排程無人在場，沒有人會追問漏掉的步驟，所以留言前逐項核對；任何一項沒過，先補做，補不了就不留言
+（記 `skipped_inconclusive`，note 寫明哪一項沒過）：
+
+1. 5.1 表中該需求的**必查工具都呼叫過**（對照 `queried`）；疑似異常一定有 `version_bulletins`。
+2. **客製檢查做過**（5.1 第 3 點），且客製標示符合 5.3 的對應規則。
+3. 版更公告對得上才有 📢 行，對不上則完全不提。
+4. 疑似異常、程式缺陷、環境／資料問題的結論，有「檔案::函式（行）」等級的程式證據，或公告／已審核 FAQ 完整吻合。
+5. SQL **沒有 `@` 變數**（改成實際值或 `'<員工編號>'` 這類占位符）；表名與欄位都驗證過。
+6. 每一句結論、每一個建議都對得到「證據」裡的一項（見 5.5）。
+
+通過後呼叫 `add_comment`（dry-run 模式改為只寫日誌，不呼叫）。
 
 ### DB 使用限制的例外（僅限 5.3／5.4）
 
@@ -166,8 +205,12 @@ SQL（唯讀 SELECT，MSSQL 2008 相容；不使用 @ 變數，條件直接寫�
 每張處理過的單（不論哪個分支、哪個結果）都寫一行到 `C:\D\JIRA_AI\goal_watch_log.jsonl`（不存在就建立，append-only）：
 
 ```json
-{"jira_key":"EHRMSONE-XXXXX","branch":"story|crisis|uncategorized","action":"commented|dry_run|skipped_already_handled|skipped_unchanged|skipped_inconclusive|skipped_low_confidence|skipped_uncategorized|rate_limited","comment_body":"實際留言內容（無留言則留空）","category":"資料調整|需求|設定問題|程式缺陷|環境資料問題|資訊不足|","confidence":"高|中|低|","note":"一句話說明判斷依據（低信心/資訊不足須寫已查到什麼、還缺什麼）","checked_at":"ISO 8601 執行時間"}
+{"jira_key":"EHRMSONE-XXXXX","branch":"story|crisis|uncategorized","action":"commented|dry_run|skipped_already_handled|skipped_unchanged|skipped_inconclusive|skipped_low_confidence|skipped_uncategorized|rate_limited","comment_body":"實際留言內容（無留言則留空）","category":"資料調整|需求|設定問題|程式缺陷|環境資料問題|資訊不足|","confidence":"高|中|低|","queried":["wiki_lookup","recall","version_bulletins","custom_git"],"note":"一句話說明判斷依據（低信心/資訊不足須寫已查到什麼、還缺什麼）","checked_at":"ISO 8601 執行時間"}
 ```
+
+- `comment_body` 存**留言全文**（與送到 Jira 的內容完全相同），不可只存摘要；dry-run 時存原本會送出的全文。
+- `queried`：這張單實際呼叫過的知識工具名稱，客製檢查做過記 `custom_git`；Story 分支記 `["git_log"]`。
+- 用 PowerShell 寫入時以 `ConvertTo-Json -Compress` 產生每一行，確保全文的換行與引號正確跳脫。
 
 不建立 DB 表，這是本排程自身的執行紀錄，不寫入 `HRMS_JIRA`／`HRMS_MEMORY`。
 
