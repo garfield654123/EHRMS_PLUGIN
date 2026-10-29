@@ -178,8 +178,9 @@ plugin 安裝或升版後，須將 plugin 內 `skills/` 的最新版同步覆蓋
 - 交由 AI 安裝時，`/setup-guide` 的 Step 5 會自動比對並引導完成同步
 - 手動同步後請在 EHRMS_GIT 以慣例訊息 commit：`docs(skills): 同步 <skill 名> 至 ehrms-tools vX.Y.Z 版`
 
-> ⚠️ `test-report` 在兩邊同名但用途不同（EHRMS_GIT 版＝Notion 測試報告產生器，plugin 版＝測試步驟撰寫規範），
-> 不在同步清單內，切勿互相覆蓋。
+> v3.13.0 起，EHRMS_GIT 的流程類 skills（bug-fix、bug-locate、debug、custom-locate、code-review-checklist、
+> db-query、test-report（Notion 測試報告）、user-config）併入 plugin；原 plugin 的測試步驟規範改名為 `test-steps`。
+> user-config 的個人設定改放 `~/.ehrms-tools/users.md`。
 
 ---
 

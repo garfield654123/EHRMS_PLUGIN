@@ -1,222 +1,177 @@
 ---
 name: test-report
-description: EHRMS Bug Fix 測試步驟撰寫規範，包含測試資料查找、步驟格式、預期結果描述及影響範圍驗證；亦含共用元件（SP/Class）修改的「改A壞B」風險驗證方法。Use when writing test steps for bug fix verification after code changes are deployed to lab, or when assessing whether a shared stored procedure/class modification could break other callers.
+description: 在 bug-fix Step 3 或手動呼叫時，整合 Jira MCP 資訊與 git log，自動建立 Notion 測試報告頁面。Use when you need to create a test report after completing a bug fix in EHRMS.
 ---
 
 執行環境：Claude Code 與 Codex 共用；工具名稱與檔案讀取方式依 [平台工具對照](../../references/platform-runtime.md) 選擇。
 
-# EHRMS 測試步驟撰寫規範
+# 測試報告產生器
 
-## 快速流程
+整合 Jira MCP、git log、對話上下文，建立 Notion 測試報告頁面。
 
-```
-問題理解 → 查找測試資料（MCP） → 撰寫步驟 → 預期結果 → 影響範圍 → jira_log 結案紀錄
-```
+**目標資料庫：** `collection://c71519b9-3000-4e8b-8622-0d63bfb97eb0`（📄 測試報告）
+**Jira Base URL、使用者設定：** 見 `~/.ehrms-tools/users.md`（由 `user-config` 管理）
 
----
+## 觸發方式
 
-## A. 測試報告基本結構
+- 由 `/bug-fix` Step 3 自動呼叫（主要路徑）
+- 手動呼叫 `/test-report`（補建報告）
 
-每份測試報告必須包含以下區塊：
+## 工作流程
 
-```
-一、問題說明      ← 一段話說清楚 bug 現象與根因
-二、測試資料      ← 現有資料 or 如何建立
-三、測試步驟      ← 操作路徑（頁面 → 條件 → 動作）
-四、預期結果      ← 修正前錯誤 vs 修正後正確
-五、影響範圍確認  ← 相關功能 checklist
-```
-
----
-
-## B. 依 Bug 類型撰寫測試步驟
-
-### B1. 查詢／篩選類
-
-**適用：** 批次轉假勤、報表查詢、員工清單篩選等功能回傳空值或錯誤名單
-
-**測試資料查找（MCP）：**
-```sql
--- 找符合條件的員工，確認修正前被過濾掉、修正後篩選得到
-SELECT TOP 5
-    a.EMPLOYEE_ID, e.EMPLOYEE_CNAME, e.EMPLOYEE_NO,
-    CONVERT(varchar, a.WORK_DATE, 111) AS WORK_DATE,
-    [關鍵欄位]
-FROM [主表] a
-JOIN HRMS_EMPLOYEE e ON a.EMPLOYEE_ID = e.EMPLOYEE_ID
-WHERE e.COMPANY_ID = [公司ID]
-  AND [舊邏輯過濾條件 = FALSE 的資料]   -- 修正前篩不到
-  AND [新邏輯條件 = TRUE 的資料]         -- 修正後篩得到
-ORDER BY a.WORK_DATE DESC
-```
-
-**步驟格式：**
-1. 進入【功能頁面】
-2. 設定篩選條件（日期範圍 / 員工 / 異常狀態等）
-3. 點擊查詢
-4. **修正前預期：** 名單為空 / 結果錯誤
-5. **修正後預期：** 顯示正確員工清單
-
----
-
-### B2. 報表顯示類
-
-**適用：** Excel 報表欄位錯位、數值計算錯誤、假別名稱顯示錯誤
-
-**測試資料查找（MCP）：**
-```sql
--- 找報表會呈現的資料，確認有觸發 bug 的情境
--- 例如：有銷假且跨日假單重疊的員工
-SELECT ...
-FROM [相關表]
-WHERE [bug 觸發條件]
-```
-
-**步驟格式：**
-1. 進入【報表功能】
-2. 設定查詢條件（公司 / 日期範圍 / 員工）
-3. 匯出或執行報表
-4. 開啟結果，檢查 [具體欄位名稱] 欄位
-5. **修正前預期：** [描述錯誤內容，例：「銷假欄顯示『特休』」]
-6. **修正後預期：** [描述正確內容，例：「銷假欄顯示『曠職』」]
-
----
-
-### B3. 排程／通知類
-
-**適用：** Email 通知格式異常、排程產生資料錯誤
-
-**前置資料準備說明：**
-
-> 排程通知測試需手動準備觸發條件資料，步驟如下：
-
-1. **確認通知設定（HRMS_NOTIFY_REFERENCE）**
-   - 通知代碼：SNR`XX`
-   - 提前天數（EXPIRE_DAYS）
-   - 發送類型（NOTIFY_TYPE）
-
-2. **建立測試資料**
-   - 建立符合通知條件的假單／申請（截止日 = 今天 + EXPIRE_DAYS）
-   - 確認員工在通知發送範圍內
-
-3. **觸發方式**
-   - 方法 A：進入通知排程管理，手動執行指定排程
-   - 方法 B：用 MCP 確認員工在通知名單中，再等排程自動執行
-
-**驗證重點：**
-- 信件表格中各欄位顯示正確格式（日期不含時間、不含 `!`）
-- 收件人完整（本人 / 主管 / 承辦人）
-- HTML 版本與 CSV 版本皆正常
-
----
-
-### B4. 資料建立類（需手動建立 bug 觸發情境）
-
-若測試環境無現成資料，需說明如何建立：
+### 步驟 1：蒐集 Jira 資訊（MCP）
 
 ```
-Step 1：建立 [資料A]（說明欄位設定）
-Step 2：建立 [資料B]（說明與 A 的關聯條件）
-Step 3：執行 [觸發動作]
-Step 4：觀察 [驗證點]
+mcp__plugin_ehrms-tools_EHRMS-jira-mcp__get_issue(issue_key="EHRMSONE-XXXXX")
 ```
 
-**重要原則：**
-- 每個步驟說明「做什麼」與「為什麼這樣設定」
-- 明確說明哪個欄位值會觸發 bug（例：`CHANGE_ENDDATE = 今天 + 6 天`）
+從 Jira 取得：
 
----
-
-## C. 測試資料查找規則（MCP）
-
-1. **優先找現有資料**，避免要求測試人員手動建立
-2. 查找時確認 company_id（使用測試公司，避免影響正式客戶資料）
-3. 提供具體的員工編號、日期範圍，讓測試人員可以直接操作
-4. 若無現有資料，提供「最小建立步驟」（Step 越少越好）
-
-**常用測試公司：**
-| company_id | 公司名稱 | 用途 |
-|-----------|---------|------|
-| 83 | 104資訊科技股份有限公司(E) | 一般功能測試 |
-| 137 | 一零四資訊科技股份有限公司(3) | 假勤功能測試 |
-| 141 | 貓狗樂園(Crystal) | Crystal 負責測試 |
-
----
-
-## D. 預期結果描述規範
-
-每個驗證點必須同時列出：
-
-| 項目 | 說明 |
+| 欄位 | 用途 |
 |------|------|
-| **修正前（錯誤）** | 描述 bug 的具體現象（不要只寫「顯示錯誤」） |
-| **修正後（正確）** | 描述正確的預期值或行為 |
-| **邊界條件** | 不應被此修正影響的其他情境 |
+| Summary（標題） | Notion 頁面標題、報告名稱 |
+| Description（問題描述） | 原本問題區塊 |
+| 根因欄位 / Comment | 根因分析 |
+| Resolution / 修復 Comment | 正確案例（解決方式） |
 
-**範例：**
+若欄位為空 → 標記「[待補充]」，不自行捏造。
+
+### 步驟 2：蒐集 Git 資訊
+
+```bash
+# 此分支相對 master 的 commit 記錄
+git log EHRMSONE-XXXXX --not origin/master --oneline
+
+# 修改的檔案清單
+git diff origin/master..EHRMSONE-XXXXX --name-only
+
+# 當前分支名稱確認
+git branch --show-current
 ```
-修正前：篩選名單為空白（0 筆結果）
-修正後：顯示符合條件的員工（含員工 0001 阿呆、0007 bentest 等）
 
-邊界條件：
-- 選擇其他異常狀態（遲到/早退/曠職）→ 結果不應受影響
-- 未選擇任何異常狀態 → 維持原本的空值提示
+從 commit message 輔助判斷修改摘要，補充至「正確案例」與「程式碼內容」欄位。
+
+> 若由 `/bug-fix` Step 3 呼叫，git 資訊應已蒐集完畢，直接使用，不重複執行。
+
+### 步驟 3：讀取使用者設定
+
+讀取 `~/.ehrms-tools/users.md`（由 user-config 管理）：
+1. 取得 `active:` 欄位的使用者名稱
+2. 找到對應 Notion User ID
+3. 取得系統設定中的 Jira Base URL
+4. 若找不到 → 詢問使用者
+
+### 步驟 4：整理測試步驟草稿
+
+根據 Jira Description 與 commit message 提供測試步驟草稿：
+
+```
+1. [根據問題描述推測的前置條件]
+2. [操作步驟簡述]
+3. 確認 [預期結果]
+（以下請使用者補充詳細步驟）
 ```
 
----
+### 步驟 5：確認報告摘要
 
-## E. 影響範圍確認 Checklist 格式
+列出即將建立的報告內容，等待使用者確認：
+
+```
+【即將建立 Notion 測試報告】
+
+標題：EHRMSONE-XXXXX: [Jira 標題]
+日期：YYYY-MM-DD
+Owner：[active 使用者]
+Tags：BugFix
+Git 分支：EHRMSONE-XXXXX
+Jira 連結：[Jira Base URL]EHRMSONE-XXXXX
+
+修改檔案：
+  - EHRMS/xxx/yyy.asp
+  - VB/EHRMS/zzz.cls
+
+⚠️ 測試步驟為草稿，建議使用者在 Notion 建立後補全。
+
+確認後將建立 Notion 頁面，是否繼續？[Y/N]
+```
+
+⚠️ 等待使用者確認後才執行步驟 6
+
+### 步驟 6：建立 Notion 頁面（含完整內容）
+
+> ⚠️ **不使用 template_id**：Notion 範本為非同步載入，若建立後立即寫入內容會因時序問題覆蓋空白頁面。改為在建立頁面時直接帶入完整 `content`，確保同步寫入。
+
+使用 `notion-create-pages`，同時設定 properties 與 content：
+
+**Properties：**
+```
+data_source_id: c71519b9-3000-4e8b-8622-0d63bfb97eb0
+Page: "EHRMSONE-XXXXX: [Jira 標題]"
+Tags: ["BugFix"]
+date:Date:start: "YYYY-MM-DD"
+date:Date:is_datetime: 0
+Owner: [Notion User ID]
+```
+
+**Content（Notion Markdown 格式，對應測試文件範本結構）：**
 
 ```markdown
-### 影響範圍確認
+### 原本問題
+[Jira Description；若為空則填「[待補充]」]
 
-- [ ] [主要修正功能] → [預期正確行為]
-- [ ] [相關功能 1] → 不受影響，結果應與修正前相同
-- [ ] [相關功能 2] → 不受影響
-- [ ] [邊界情境] → [預期行為]
+### 錯誤範例
+[以人類可讀的方式說明「原本行為哪裡錯」，重點是現象與原因，而非程式碼。
+格式範例：
+  「XXX 時數會因 YYY 被重複計算 N 次，導致結果偏大／偏小／變負數。」
+  若有具體數字案例，列出：原始值 → 錯誤計算結果。
+  若無 debug 上下文 → 填「[待補充]」]
+
+### 正確案例
+[以人類可讀的方式說明「正確行為應該是什麼」，對應錯誤案例做比較說明。
+格式範例：
+  「XXX 時數只應計算一次，不受 YYY 影響，結果應為 Z 小時。」
+  若有具體數字案例，列出：原始值 → 正確計算結果。
+  若為空 → 填「[待補充]」]
+
+### 測試內容
+[測試案例說明]
+
+### 測試步驟
+[步驟 4 的草稿內容]
+
+### 注意事項
+[風險評估、影響範圍；若無則填「[待補充]」]
+
+## 以下為詳細更改部分(供內部參考)
+
+### 有更動過之檔案
+[git diff --name-only 結果，每行一個檔案路徑]
+Jira：[Jira Base URL]EHRMSONE-XXXXX
+Git 分支：EHRMSONE-XXXXX
+
+### 程式碼內容
+[說明修改了哪個函數／哪段邏輯，以及修改的方向。格式：
+  修改檔案：[檔案名稱] 的 [函數名稱]
+  修改說明：[一句話說明改了什麼邏輯，例如「加入中間層 GROUP BY 以防止重複計算」]
+  Commit：[git log --oneline 的摘要]
+  若無上下文 → 僅填 commit 摘要]
 ```
 
----
+### 步驟 7：回報結果
 
-## F. 結案紀錄沉澱（HRMS_JIRA）
-
-測試報告輸出**前**，把本次 bug fix 寫入結案紀錄（此時程式修改已定案，是記錄 changed_files 的最佳時點）：
-
-1. `jira_lookup(單號)` 查重
-2. 無紀錄 → `jira_log(kind="Story", jira_key=單號, title=一句話摘要, root_cause=發生根因, resolution=解決方式, changed_files=修改的程式（一行一筆「repo 相對路徑 :: 函式」，如 `VB/EHRMS/xx.cls :: CalcOT`，勿用本機絕對路徑；Story 必填）, keywords=3~8 個)`
-3. 已有紀錄且結論已改變 → 帶 `supersedes=舊ID` 訂正；內容相同則不重寫
-
----
-
-## G. 常見 Bug 類型與對應測試重點
-
-| Bug 類型 | 測試重點 | MCP 查找方向 |
-|---------|---------|------------|
-| 篩選條件錯誤 | 有無資料回傳 | 找「舊條件排除但新條件通過」的資料 |
-| 排序錯位 | 欄位配對是否正確 | 找有多筆同日期不同假別的員工 |
-| 日期格式異常 | 日期顯示格式 | 找有 CHANGE_ENDDATE / EVENT_DATE 的假單 |
-| 銷假假別錯誤 | 銷假欄假別名稱 | 找有跨日假單且同日有另一假別並有銷假的員工 |
-| 空白欄位 | 特定欄位是否有值 | 直接查目標欄位為 NULL 或 1900/1/1 的資料 |
-
----
-
-## H. 共用元件（SP／Class）修改的「改A壞B」風險驗證方法
-
-**適用：** 修改被多個模組共用的 Stored Procedure 或共用 Class（例如 `GetEmpRollBack_all`、`clsReportBuilder` 等），部署前需評估是否會影響其他呼叫端。
-
-**流程：**
 ```
-列出所有呼叫端 → 列出所有欄位使用端 → 交集比對 → 逐一核對用途語意
-→ 查DB schema驗證型別假設 → fallback值安全性查證 → 風險分層 → 部署前備份現行版本
+✅ 測試報告已建立
+
+標題：EHRMSONE-XXXXX: [Jira 標題]
+連結：[Notion 頁面 URL]
+
+⚠️ 測試步驟為草稿，請至 Notion 頁面補充完整測試步驟。
 ```
 
-1. **列出所有呼叫端**：`Grep` 全 repo 搜尋 SP 名稱／函式名稱（`output_mode: files_with_matches`），統計共用範圍涵蓋幾個檔案、屬於哪些功能模組。
-2. **列出欄位使用端**：對本次新增／修改的欄位名稱另外 Grep 一次，找出「誰在讀這個欄位」。
-3. **交集比對**：呼叫端 ∩ 欄位使用端＝真正需要逐一核對的消費者；其餘檔案只是呼叫 SP 拿其他欄位，理論上不受影響（仍建議部署後抽測風險最高的 1-2 個，見步驟 7）。
-4. **核對用途語意**：交集內每個消費者，確認該欄位用途是否與本次修改語意一致（例如都只是「JOIN 對照表取名稱」）。若發現有消費者把欄位挪作他用（例如當日期運算、當其他業務判斷依據），視為高風險，須額外確認後才能繼續。
-5. **DB schema 驗證假設**：修改理由中若包含「這個欄位其實是 XX 型別」之類的假設（尤其是欄名與實際型別不符的歷史遺留設計，如欄名含 `DATE` 但實際存 int），務必用 `get_table_columns`／`mssql_query` 查 `sys.columns` 實際驗證，不能只憑欄位名稱或程式碼註解推測。
-6. **Fallback 值安全性**：若修改引入 fallback（如查無資料補 0／NULL），要查詢目標對照表是否已存在會被誤判為「有效值」的資料（例如補 0 前，查對照表有無 `ID<=0` 的合法資料，避免補 0 後意外顯示成某個真實值）。
-7. **風險分層**：把呼叫端分成「唯一消費且已核對安全」／「無關但共用、部署後抽測」兩層，寫進測試報告的影響範圍段落，並列出建議抽測的檔案（優先挑風險最高、影響金額或法遵計算的模組，如薪資試算）。
-8. **部署前備份**：用 `OBJECT_DEFINITION(OBJECT_ID('SP名稱'))` 查詢目前部署版本的完整定義，存成 `<SP名稱>_Backup_<日期>.SQL`（DROP+CREATE 可重複執行格式）放在對應的 `script/StoredProcedure` 資料夾，作為快速回退依據。
+## 注意事項
 
-**範例（EHRMSONE-33067）：** `GetEmpRollBack_all` 被 27 個檔案呼叫，本次新增三個「起任原因」欄位；Grep 交叉比對後只有 3 個檔案（`clsPerData_Exp.cls` ×2、`clsReportBuilder.cls`）真正讀取這些欄位，且用途皆為 `LEFT JOIN HRMS_ALTERATION_CAUSE` 查原因名稱，無另作他用情形，判定風險低；仍建議部署後抽測薪資試算類（`clsPAYSalaryCacul.cls`）確認無異常。
+- 此資料庫為 wiki，**不可使用 `notion-update-data-source` 更新屬性值**
+- 若 Jira 單號不存在或無法取得，標題格式改為：`[YYYY-MM-DD] 問題簡述`
+- `錯誤範例` 欄位來源判斷：
+  - 有 `/debug` 流程上下文 → 使用【問題程式碼】區塊的關鍵片段
+  - 無上下文（直接從 `/bug-fix` 呼叫）→ 填「[待補充]」

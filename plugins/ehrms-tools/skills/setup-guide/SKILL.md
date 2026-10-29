@@ -21,7 +21,7 @@ description: 引導安裝及驗證 Claude Code／Codex 共用的 EHRMS 工具包
    若專案已有 crisis-triage、mail-query、weekly-report 的舊副本，先比對差異，再依使用者需求同步
    完整技能目錄（含 references/scripts）。Claude 專案目錄是 .claude/skills/，
    Codex 專案目錄是 .agents/skills/。不要自動 stage 或 commit。
-   EHRMS_GIT 的 test-report 是 Notion 報告技能，本插件同名技能是測試規範，不能互相覆蓋。
+   流程類技能（bug-fix、test-report、test-steps 等）已併入本插件；EHRMS_GIT 若仍有同名舊副本，先比對再決定是否移除。
 6. 重新載入客戶端／開新對話後，依下列測試確認工具可用。
 
 ## 連線測試

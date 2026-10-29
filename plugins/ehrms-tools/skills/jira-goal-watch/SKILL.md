@@ -78,28 +78,40 @@ ORDER BY updated ASC
 
 ### 5.1 取單與快篩（並行呼叫）
 
-1. `get_issue`（含最新評論；結構化欄位 `customer`／`severity`／`category` 一併記下）。
-2. 同時以問題敘述呼叫 ehrms-memory：`recall`（系統知識與 Engineer 入口）、`jira_lookup`（過往相似案，⏳未審核者僅供方向、須自行追碼驗證）、`faq_lookup`、`bulletin_lookup`。
-3. 有圖片附件用 `get_attachment` 判讀；**影片（mp4 等）無法判讀**，不猜，於日誌 note 註明「僅有影片」。
+1. `get_issue`（含最新評論；結構化欄位 `customer`／`severity`／`category` 一併記下）。**先讀最新留言確認目前進度**：工程師已處理完（例如留言「修改完畢」、狀態 CS CONFIRM）時，不再分析原因，記 `action="skipped_unchanged"`。
+2. 同時以問題敘述呼叫 ehrms-memory：`wiki_lookup`（系統原則與規則）、`recall`（系統知識與 Engineer 入口）、`jira_lookup`（過往相似案，⏳未審核者僅供方向、須自行驗證）、`faq_lookup`、`sop_lookup`（客戶需求的處理 SOP）。
+   疑似異常（回報錯誤、結果不符、功能無法使用）時另呼叫 `version_bulletins` 整批比對已知版更問題。
+3. 有圖片附件用 `get_attachment` 判讀；**影片（mp4 等）無法判讀**，不猜，於日誌 note 註明「僅有影片」。描述裡有 `[image: …]` 但附件清單沒有這張圖時，日誌 note 註明「內嵌圖片無法讀取」，不可假設圖片內容。
 
-### 5.2 分類（五選一，每一類都要有具體依據）
+### 5.2 先判斷單的性質，再分類（每一類都要有具體依據）
+
+Jira 的 issuetype（Crisis - Level C 等）與嚴重度（Fatal 等）分不出單的性質，一律從標題、描述與最新留言判斷，**維運單不等於 bug**：
 
 | 分類 | 判定依據 | 追碼（5.3） |
 |---|---|---|
+| 資料調整（需求單） | 請協助修改／更正／補登／刪除／解鎖資料、調整參數，沒有要求查原因 | 免；改走 5.2a |
 | 需求 | 客戶要的是現有系統沒有的功能（描述／對話明確） | 可免（FAQ/既有功能確認即可） |
-| 設定／操作問題 | FAQ／公告命中且完整涵蓋，或追碼確認為參數／權限／操作所致 | FAQ 完整命中可免，否則必做 |
-| 程式缺陷（bug） | 追碼可指出邏輯錯誤 | **必做** |
-| 環境／資料問題 | 資料異常、主機時間不同步、版本／DLL 未部署、客製落後標準版等 | **必做** |
+| 設定／操作問題 | Wiki／FAQ／SOP 命中且完整涵蓋，或追碼確認為參數／權限／操作所致 | 完整命中可免，否則必做 |
+| 程式缺陷（bug） | 追碼可指出邏輯錯誤 → 建議轉 Story 走上版流程（由人轉單） | **必做** |
+| 環境／資料問題 | 資料異常、主機時間不同步、版本／DLL 未部署、已知版更問題、客製落後標準版等 | **必做**（已知版更問題命中公告可免） |
 | 資訊不足 | 描述、截圖、評論皆無法判斷 | —（不留言，見 5.5） |
 
-不可為了留言而勉強歸類；「設定／需求／諮詢」是正當分類，不等於失敗。
+不可為了留言而勉強歸類；「資料調整／設定／需求／諮詢」是正當分類，不等於失敗。
+
+### 5.2a 資料調整：核對清單＋處理語法
+
+1. 用 ✅／❌ 核對：客戶（統編、名稱）、功能或表單、對象名單（員工編號＋姓名）、單據識別（單號或日期期間）、要改的欄位（改前值 → 改後值）；解鎖類另核對鎖定期間與範圍。
+2. `sop_lookup` 查前置確認與該套哪個 Task，再 `task_lookup` 找範本。範本只能「參考改寫」，要逐行說明哪裡改了（例如範本註解掉的行被打開）。
+3. 沒有合適範本時才從程式找出實際存取的表與欄位（Grep 頁面或欄位名），並以 `get_table_columns` 驗證。
+4. 語法依 5.4 的格式（查詢 → 修改 → 後查）。對象名單或改後值還缺時，留言列出要向客戶確認的事項，不要自行假設。
 
 ### 5.3 追碼（必做項目）
 
-- **入口**：優先採 `recall` 命中的 Engineer `entry_path`；沒有才以功能關鍵字 Grep 定位，比照 `crisis-triage` 步驟 4。Big5 的 `.cls` 先以 PowerShell codepage 950 讀出再搜尋中文。
+- **錯誤訊息先定位出處**：截圖或描述有錯誤訊息原文時，先用訊息原文（取一段不含變數的中文）Grep `.asp`／`.cls`／`.js`，以**實際產生這段訊息的檔案::函式（行）**為準。`recall` 的 `entry_path`、過往單或其他 AI 留言提到的位置只當方向；與 Grep 結果不同時以 Grep 為準，並在日誌 `note` 註記「記憶入口需訂正：舊 → 新」。
+- **入口**：沒有錯誤訊息時，優先採 `recall` 命中的 Engineer `entry_path`；沒有才以功能關鍵字 Grep 定位，比照 `crisis-triage` 步驟 4。Big5 的 `.cls` 先以 PowerShell codepage 950 讀出再搜尋中文。
 - **呼叫鏈**：ASP → VB6 → SP/View/Function，追到能說明行為的那一層。
 - **SP/View/Function 定義**：先查 repo（`script/StoredProcedure`、`script/View`、`script/Function`）；repo 沒有、或版本可疑（例如只有舊版同名系列）時，改用 DB MCP 讀取物件定義（見下方「DB 使用限制的例外」）。
-- **客製懷疑**：`customer` 有客戶名稱且 `recall`／描述提到客製，或標準版程式碼無法解釋客訴行為時，比照 `custom-locate` 找 `C:/D/CUSTOM_GIT` 的客戶分支，但**排程環境一律唯讀、不切換分支**：用 `git -C C:/D/CUSTOM_GIT branch -a` 找分支，再以 `git -C C:/D/CUSTOM_GIT show <分支>:<路徑>` 或 `git -C C:/D/CUSTOM_GIT grep <關鍵字> <分支> -- <目錄>` 讀取，**禁止 `git checkout`**（CUSTOM_GIT 是共用工作目錄）。
+- **客製檢查**：用 `customer` 欄位的統編（或標題開頭的公司名）以 `git -C C:/D/CUSTOM_GIT branch -a` 找客戶分支（命名為「統編_代號_公司名」），有分支再用 `git -C C:/D/CUSTOM_GIT -c core.quotepath=off ls-tree -r --name-only origin/<分支>` 列出客製檔案。**只有在上一步定位到的程式檔（或同功能的程式）出現在客製檔案中時**，才在留言標示「⚠ 可能為客製功能」並以客製分支的程式為準（`git -C C:/D/CUSTOM_GIT show <分支>:<路徑>` 讀取）；對不上或查無分支時留言不提客製（客製資料不完整，查不到不代表沒有客製）。**排程環境一律唯讀、不切換分支，禁止 `git checkout`**（CUSTOM_GIT 是共用工作目錄）。
 - 結論須具體到「檔案::函式（行）」，不可只寫模組名稱。
 
 ### 5.4 需客戶端資料時：預先備好查詢包
@@ -108,10 +120,13 @@ ORDER BY updated ASC
 
 ```
 假設 H1：一句話說明
-SQL（唯讀 SELECT，條件用佔位符如 @EMPLOYEE_ID、@DATE，MSSQL 2008 相容）：
+SQL（唯讀 SELECT，MSSQL 2008 相容；不使用 @ 變數，條件直接寫實際值，
+     不確定的值用明顯的占位符如 '<員工編號>'、'<日期>'）：
   ...
 結果解讀：若 <條件> → H1 成立；若 <條件> → 排除 H1，改看 H2
 ```
+
+需要修改資料時（資料調整類，或確認是資料問題），語法分三段：1. 修改前查詢確認現況與筆數 2. 修改（包在 `BEGIN TRAN` 中，註明確認筆數正確才 `COMMIT`）3. 修改後再查一次；並提醒先備份相關資料表、已結薪的資料要確認不影響已結薪資。
 
 - **留言前必須驗證**：查詢包引用的每個表名與欄位，都要用 `get_table_columns` 或 `mssql_query` 查 `INFORMATION_SCHEMA.COLUMNS` 確認存在，驗證過才可寫進留言；未驗證的欄位不得出現在查詢包，並在留言的「需客戶端確認」段末註明「欄位已以 schema 驗證」。
 - 引用的表名／欄位先以 `get_table_columns`／`search_tables` 確認存在；**不對業務資料表執行這些 SQL**（公司 DB 無客戶資料），只擬草稿。
@@ -123,19 +138,22 @@ SQL（唯讀 SELECT，條件用佔位符如 @EMPLOYEE_ID、@DATE，MSSQL 2008 �
 - **中**：有具體候選根因，但需客戶端資料確認（須附 5.4 查詢包）。
 - **低**：僅推測。→ **不留言**，日誌記 `action="skipped_low_confidence"`，`note` 寫明已查到什麼、還缺什麼（供人工接手）。
 - 「資訊不足」同樣不留言，日誌 `note` 列出缺哪些資訊。
+- **每一句結論都要對得到「證據」裡的一項**。不得寫出證據沒有支持的通則或限制（例如「某功能本來就不能做 X」「客戶只要重新儲存即可」）；建議的操作要確認在本案條件下可行（例如已結薪就不能建議重新儲存）。沒有依據的內容寧可不寫。
 
 留言（對象為內部工程師，可直接引用程式位置）格式：
 
 ```
 【AI 排程自動回覆｜依 ziping.zhou 設定的 goal 執行，如有誤請忽略並等待本人確認】
-分類：需求｜設定問題｜程式缺陷｜環境／資料問題　信心：高｜中
-結論：一到三句，直接講原因
+（版更公告對得上時才加這行）📢 可能為已知版更問題（公告 #編號 標題）：更新程式／修正版號，請確認客戶目前版本
+（客製檔案對得上時才加這行）⚠ 可能為客製功能：<客製分支>／<對得上的客製檔案>
+分類：資料調整｜需求｜設定問題｜程式缺陷｜環境／資料問題　信心：高｜中
+結論：一到三句，直接講原因（資料調整則講需求摘要與缺漏的資訊）
 證據：
 - 截圖／描述：…
-- 程式：檔案::函式（行）…（客製則註明客戶分支）
-- FAQ／公告／過往單：ID（未審核者註明「未經審核」）
+- 程式：檔案::函式（行）…（錯誤訊息須為實際產生訊息的位置；客製則註明客戶分支）
+- Wiki／FAQ／SOP／Task／公告／過往單：ID（未審核者註明「未經審核」）
 需客戶端確認（若有）：H1…（SQL 與結果解讀見 5.4）
-建議下一步：…
+建議下一步：…（程式缺陷時建議轉 Story）
 ```
 
 呼叫 `add_comment`（dry-run 模式改為只寫日誌，不呼叫）。
@@ -148,7 +166,7 @@ SQL（唯讀 SELECT，條件用佔位符如 @EMPLOYEE_ID、@DATE，MSSQL 2008 �
 每張處理過的單（不論哪個分支、哪個結果）都寫一行到 `C:\D\JIRA_AI\goal_watch_log.jsonl`（不存在就建立，append-only）：
 
 ```json
-{"jira_key":"EHRMSONE-XXXXX","branch":"story|crisis|uncategorized","action":"commented|dry_run|skipped_already_handled|skipped_unchanged|skipped_inconclusive|skipped_low_confidence|skipped_uncategorized|rate_limited","comment_body":"實際留言內容（無留言則留空）","category":"需求|設定問題|程式缺陷|環境資料問題|資訊不足|","confidence":"高|中|低|","note":"一句話說明判斷依據（低信心/資訊不足須寫已查到什麼、還缺什麼）","checked_at":"ISO 8601 執行時間"}
+{"jira_key":"EHRMSONE-XXXXX","branch":"story|crisis|uncategorized","action":"commented|dry_run|skipped_already_handled|skipped_unchanged|skipped_inconclusive|skipped_low_confidence|skipped_uncategorized|rate_limited","comment_body":"實際留言內容（無留言則留空）","category":"資料調整|需求|設定問題|程式缺陷|環境資料問題|資訊不足|","confidence":"高|中|低|","note":"一句話說明判斷依據（低信心/資訊不足須寫已查到什麼、還缺什麼）","checked_at":"ISO 8601 執行時間"}
 ```
 
 不建立 DB 表，這是本排程自身的執行紀錄，不寫入 `HRMS_JIRA`／`HRMS_MEMORY`。
