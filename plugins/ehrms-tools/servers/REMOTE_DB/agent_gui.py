@@ -19,6 +19,8 @@ import agent
 
 APP_DIR = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
 INI = APP_DIR / "agent.ini"
+# 打包時以 --add-data 放進 exe，執行時解壓到 sys._MEIPASS
+ICON = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "icon.ico"
 # 中繼伺服器預設為 zrok 固定網址（relay 跑在工程師電腦 8770，經 zrok 公開）
 DEFAULTS = {"server": ".", "user": "ehrms", "relay": "wss://ehrms-relay.shares.zrok.io"}
 IDLE_LIMIT = 60 * 60  # 秒，1 小時沒有任何查詢就中斷；每收到一筆查詢重新計時
@@ -287,6 +289,10 @@ def main():
     except Exception:
         pass
     root = tk.Tk()
+    try:
+        root.iconbitmap(default=str(ICON))
+    except tk.TclError:
+        pass  # 找不到圖示時沿用預設
     App(root)
     root.mainloop()
 

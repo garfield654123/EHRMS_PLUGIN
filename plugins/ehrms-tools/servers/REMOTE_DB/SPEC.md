@@ -94,8 +94,10 @@ agent 保持長連線；MCP 端每次查詢開一條新連線。
 
 ```bash
 py -3.8 -m pip install "pyinstaller==5.13.2" "websockets<14" pyodbc certifi
-py -3.8 -m PyInstaller --noconfirm --onefile --noconsole --name EHRMS_Connect agent_gui.py
+py -3.8 -m PyInstaller --noconfirm --onefile --noconsole --name EHRMS_Connect --icon icon.ico --add-data "icon.ico;." agent_gui.py
 ```
+
+`--icon` 設定 exe 檔案圖示；`--add-data` 把同一個 `icon.ico` 放進 exe，執行時由 `sys._MEIPASS` 讀出當作視窗與工作列圖示。`icon.ico`（16～256 多尺寸、透明背景）與預覽用 `icon.png` 由兔子原圖轉成，放在本目錄。
 
 因此 `agent.py`、`agent_gui.py` 必須維持 Python 3.8 相容（例如不可用 `asyncio.to_thread`、`str.removeprefix`、`match`）。relay 與 MCP 端不受此限制。
 
