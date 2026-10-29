@@ -131,14 +131,32 @@ py -3.8 -m PyInstaller --noconfirm --onefile --noconsole --name EHRMS_Connect ag
 
 | 項目 | 規則 |
 |---|---|
-| 語法 | 去除註解與字串後，必須以 `SELECT` 或 `WITH` 開頭；不可含分號 |
-| 禁用關鍵字 | `insert update delete merge drop alter create truncate exec execute grant revoke deny backup restore shutdown dbcc openrowset opendatasource openquery bulk into waitfor use`、`xp_*`、`sp_*` |
+| 只讀判斷（主要） | `SET SHOWPLAN_XML ON` 下送出整個批次，**只編譯不執行**；SQL Server 回報的每個 `StatementType` 都必須是 `SELECT` 或 `SELECT WITHOUT QUERY`，其餘（含不認得的類型）整批拒絕；編譯失敗也拒絕 |
+| 資料庫範圍 | 執行計畫中每個物件的 `Database` 只能是本客戶主庫或其 _WF；`master`（含 `sys.databases`）、其他客戶的庫一律拒絕 |
+| 額外禁止 | SHOWPLAN 仍判為 SELECT 的 `openrowset opendatasource openquery openxml`（讀伺服器檔案／外部伺服器）與鎖定 hint `tablock tablockx xlock updlock holdlock paglock serializable repeatableread`；直接比對原始語法，出現在字串中也擋 |
+| 交易保險 | 連線關閉自動 commit，執行後一律 `rollback` 再關閉 |
 | 筆數 | 最多 500 筆，超過標示 `truncated` |
 | 逾時 | 連線 10 秒、查詢 30 秒 |
-| 驅動 | `{SQL Server}`（Windows 內建，免安裝，支援 MSSQL 2008） |
+| 驅動 | `{SQL Server}`（Windows 內建，免安裝，支援 MSSQL 2008；已實測可讀取 SHOWPLAN 輸出） |
 | 帳密 | 只在 agent 記憶體中，不經 relay、MCP 或 AI。命令列版帳號留空則使用 Windows 驗證 |
+| 權限 | 帳號需有 SHOWPLAN 權限（db_owner 已有）；日後改用唯讀帳號時要 `GRANT SHOWPLAN` |
 
-關鍵字檢查以字詞比對，欄位名稱剛好是禁用字（如 `use`）時會誤擋，屬已知限制。
+### 為什麼改用 SHOWPLAN（2026-10-29 安全檢查）
+
+原本以正規表示式去除註解與字串後比對黑名單，在 LocalDB 實測可被繞過並**實際刪改資料**：
+
+| 繞過方式 | 範例 |
+|---|---|
+| 字串內的 `--`、`/*` 被當成註解，藏住後面的語句 | `SELECT '--' AS a DELETE FROM t COMMIT` |
+| `[...]`、`"..."` 識別字內的單引號誤導字串判斷 | `SELECT 1 AS [x'] DELETE FROM t COMMIT SELECT 1 AS [y']` |
+| 黑名單漏網，且 T-SQL 多語句不需分號 | `... UPDATETEXT ... COMMIT`、`KILL` |
+
+pyodbc 預設不自動 commit 只擋住沒有 `COMMIT` 的情況。改用 SHOWPLAN 後，以實際使用的 `{SQL Server}` 驅動＋Python 3.8 對 LocalDB 測 34 個案例（上述繞過、UPDATE／DELETE、DDL、GRANT、USE、EXEC、IF 分支、WAITFOR、SET、交易、SELECT INTO、跨庫、OPENROWSET、鎖定 hint 與正常查詢），全部符合預期且資料未被改動。LocalDB 為 SQL Server 2019，客戶端 2008 尚未實測；白名單只放行兩種 SELECT，類型名稱若有差異只會誤擋、不會誤放行。
+
+### 仍未處理
+
+- **relay 沒有驗證**：任何人知道 zrok 網址並猜中 6 碼配對碼，就能不經 MCP 與人工核准直接送查詢（SHOWPLAN 確保只能讀，但仍可讀取客戶資料）。需加上 MCP 端 token 與配對碼嘗試次數限制
+- 最根本的防線仍是請客戶為本工具建立只有 `db_datareader`（＋`SHOWPLAN`）權限的帳號
 
 ## 安裝與測試（第一階段）
 

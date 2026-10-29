@@ -19,39 +19,65 @@ import websockets
 
 MAX_ROWS = 500
 QUERY_TIMEOUT = 30  # 秒
-# 一律以註解與字串之外的內容判斷，避免 SELECT 後面夾帶其他語法
+# 是否只讀由 SQL Server 自己判斷：SET SHOWPLAN_XML ON 下送出語法只編譯不執行，回報批次中每個語句的 StatementType。
+# 自行切字串判斷曾被字串／識別字內的 -- 與單引號、及不需分號的多語句批次繞過（見 SPEC.md）。
+ALLOWED_STATEMENTS = {"SELECT", "SELECT WITHOUT QUERY"}
+# SHOWPLAN 仍判為 SELECT、但不允許的寫法：讀取伺服器檔案或外部伺服器、鎖定資料表。
+# 直接比對原始語法，出現在字串裡也擋（寧可誤擋）。
 FORBIDDEN = re.compile(
-    r"\b(insert|update|delete|merge|drop|alter|create|truncate|exec|execute|grant|revoke|deny|"
-    r"backup|restore|shutdown|dbcc|openrowset|opendatasource|openquery|bulk|into|waitfor|use)\b|\bxp_|\bsp_",
+    r"\b(openrowset|opendatasource|openquery|openxml|tablock|tablockx|xlock|updlock|holdlock|paglock|"
+    r"serializable|repeatableread)\b",
     re.I,
 )
 
 
-def strip_comments_and_strings(sql):
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
-    sql = re.sub(r"--[^\n]*", " ", sql)
-    return re.sub(r"N?'(?:[^']|'')*'", "''", sql)
-
-
 def check_select(sql):
-    body = sql.strip().rstrip(";").strip()
-    bare = strip_comments_and_strings(body).strip()
-    if not re.match(r"^(select|with)\b", bare, re.I):
-        raise ValueError("只允許 SELECT（或 WITH ... SELECT）語法")
-    if ";" in bare:
-        raise ValueError("只允許單一語法，不可用分號串接")
-    hit = FORBIDDEN.search(bare)
+    """送到資料庫前的靜態檢查；只讀與否的主要判斷在 verify_plan。"""
+    body = sql.strip()
+    if not body:
+        raise ValueError("沒有查詢語法")
+    hit = FORBIDDEN.search(body)
     if hit:
-        raise ValueError(f"語法含不允許的關鍵字：{hit.group(0)}")
+        raise ValueError(f"不允許使用 {hit.group(0)}（外部讀取或鎖定資料表）")
     return body
 
 
-def run_select(conn_str, sql):
+def verify_plan(cur, sql, allowed_dbs):
+    """以 SHOWPLAN_XML 編譯（不執行）整個批次：每個語句都必須是 SELECT，且只能用到允許的資料庫。"""
+    cur.execute("SET SHOWPLAN_XML ON")
+    try:
+        try:
+            cur.execute(sql)
+            plans = []
+            while True:
+                plans += [r[0] for r in cur.fetchall()]
+                if not cur.nextset():
+                    break
+        except pyodbc.Error as e:  # 語法錯誤、缺少 SHOWPLAN 權限等
+            raise ValueError(f"無法分析此語法，不予執行：{e}")
+    finally:
+        cur.execute("SET SHOWPLAN_XML OFF")
+
+    types = [t for xml in plans for t in re.findall(r'StatementType="([^"]*)"', xml)]
+    if not types:
+        raise ValueError("無法分析此語法，不予執行")
+    bad = sorted({t for t in types if t not in ALLOWED_STATEMENTS})
+    if bad:
+        raise ValueError(f"只允許 SELECT，此語法含：{'、'.join(bad)}")
+    allowed = {d.lower() for d in allowed_dbs}
+    used = {d.strip("[]") for xml in plans for d in re.findall(r'Database="([^"]*)"', xml)}
+    other = sorted(d for d in used if d.lower() not in allowed)
+    if other:
+        raise ValueError(f"只能查詢本客戶的資料庫，此語法用到：{'、'.join(other)}")
+
+
+def run_select(conn_str, sql, allowed_dbs):
     body = check_select(sql)
-    conn = pyodbc.connect(conn_str, timeout=10)
+    conn = pyodbc.connect(conn_str, timeout=10, autocommit=False)
     try:
         conn.timeout = QUERY_TIMEOUT
         cur = conn.cursor()
+        verify_plan(cur, body, allowed_dbs)
         cur.execute(body)
         cols = [c[0] for c in cur.description]
         rows = cur.fetchmany(MAX_ROWS + 1)
@@ -59,7 +85,10 @@ def run_select(conn_str, sql):
         rows = [[None if v is None else str(v) for v in r] for r in rows[:MAX_ROWS]]
         return cols, rows, truncated
     finally:
-        conn.close()
+        try:
+            conn.rollback()  # 保險：萬一有漏網的寫入也不留下
+        finally:
+            conn.close()
 
 
 def detect_databases(server, user, password):
@@ -161,8 +190,9 @@ async def handle(req, conns, info, log):
         if db not in conns:
             raise ValueError("此客戶沒有表單資料庫（統編_WF）" if db == "wf" else f"不支援的資料庫：{db}")
         # 不用 asyncio.to_thread：客戶端 exe 以 Python 3.8 打包（支援舊版 Windows）
+        allowed_dbs = [d for d in (info.get("database"), info.get("wf_database")) if d]
         cols, rows, truncated = await asyncio.get_running_loop().run_in_executor(
-            None, run_select, conns[db], req["sql"])
+            None, run_select, conns[db], req["sql"], allowed_dbs)
         log(f"→ 回傳 {len(rows)} 筆" + ("（已截斷）" if truncated else ""))
         return {"id": req["id"], "columns": cols, "rows": rows, "truncated": truncated}
     except Exception as e:

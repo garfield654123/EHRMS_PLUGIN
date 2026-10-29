@@ -66,7 +66,9 @@ def format_customer(info, expected_sno):
 
 @mcp.tool()
 async def query(sql: str, reason: str, database: str = "main") -> str:
-    """在已確認的客戶資料庫執行單一 SELECT，最多回傳 500 筆。
+    """在已確認的客戶資料庫執行 SELECT，最多回傳 500 筆。
+    客戶端先以 SHOWPLAN 編譯檢查：批次中只要有任何非 SELECT 語句（含 DECLARE 賦值以外的 SET、EXEC、交易控制）、
+    SELECT INTO、跨到主庫與 _WF 以外的資料庫（含 master、sys.databases）、OPENROWSET 類外部讀取或鎖定 hint，整批拒絕。
     客戶端多為 MSSQL 2008：不可用 FOR JSON、STRING_AGG、TRY_CONVERT、OFFSET/FETCH 等新語法。
     reason：說明這次查詢要確認什麼，供使用者核准時判斷。
     database："main" 為客戶主資料庫（統編）；"wf" 為表單資料庫（統編_WF，簽核表單相關資料）。"""

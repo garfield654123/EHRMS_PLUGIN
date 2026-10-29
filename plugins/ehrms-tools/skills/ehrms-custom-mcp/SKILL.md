@@ -37,7 +37,8 @@ AI 不得自行猜測或嘗試配對碼；沒有配對碼就向使用者要。
 
 - 欄位與關聯先用 DB MCP `get_table_columns`、`search_tables` 或 `recall`、`wiki_lookup` 確認（這些查的是結構與知識庫，不是客戶資料）
 - 客戶端多為 **MSSQL 2008**：不可用 `FOR JSON`、`STRING_AGG`、`TRY_CONVERT`、`IIF`、`FORMAT`、`OFFSET/FETCH`
-- 只能**單一 SELECT**（或 `WITH ... SELECT`）；不可有分號、`INTO`、`EXEC`、`USE`、`xp_`／`sp_` 等，會被客戶端擋下
+- 只能 SELECT：客戶端以 SHOWPLAN 編譯檢查整批語法，任何非 SELECT 語句（`DECLARE`／`SET`／`EXEC`、交易控制、`IF` 等流程控制）、`SELECT INTO` 都會整批拒絕；可用 CTE、UNION、子查詢，多個 SELECT 只會回傳第一個結果
+- 只能查本客戶的主庫與 _WF：不可跨到 `master`、`sys.databases` 或其他資料庫；不可用 `OPENROWSET` 類外部讀取與 `TABLOCKX`／`HOLDLOCK` 等鎖定 hint（`NOLOCK` 可用）
 - 一律加篩選條件（員工、日期區間、單號），只選需要的欄位；最多回傳 500 筆，被截斷時加條件重查
 - 避免撈個資欄位（身分證、生日、住址、帳號、薪資明細）；確有必要時在 `reason` 說明
 - 同一問題需要多個查詢時，能合併就合併，減少使用者核准次數
@@ -64,7 +65,10 @@ AI 不得自行猜測或嘗試配對碼；沒有配對碼就向使用者要。
 | 無法連到 relay | 工程師電腦的 relay 沒在執行；請使用者執行 start-relay.ps1 |
 | 配對碼對應的資料庫已改變 | 客戶端換了資料庫重新登入；重新 connect 並再次確認客戶 |
 | 等待客戶端回應逾時（60 秒） | 查詢太重或客戶端斷線；縮小範圍後重試 |
-| 只允許 SELECT／語法含不允許的關鍵字 | 改寫成單一 SELECT；欄位名剛好是禁用字（如 `use`）時用中括號或別名仍可能被擋，改用其他寫法 |
+| 只允許 SELECT，此語法含：… | 列出的是 SQL Server 判讀到的語句類型；拿掉該語句，改寫成純 SELECT |
+| 只能查詢本客戶的資料庫，此語法用到：… | 移除跨庫查詢；_WF 資料改用 `database="wf"` |
+| 不允許使用 OPENROWSET／TABLOCKX… | 移除外部讀取或鎖定 hint；這些字出現在字串裡也會被擋 |
+| 無法分析此語法，不予執行 | 語法錯誤（常見為用了 2008 不支援的寫法）或帳號沒有 SHOWPLAN 權限；看錯誤訊息修正 |
 
 ## 連線行為（回答使用者時參考）
 
