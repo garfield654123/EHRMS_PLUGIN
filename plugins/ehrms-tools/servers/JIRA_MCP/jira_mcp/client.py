@@ -2,9 +2,13 @@
 
 import json as _json
 import os
+import ssl
 from typing import Any, Optional
 import httpx
 from .config import config, JiraCredentials
+
+# Modify By Willie 2026/11/03:改用 Windows 憑證存放區驗證 SSL，公司 SSL 檢查代理的自簽根憑證才能通過（httpx 預設 certifi 不含）
+_SSL_CONTEXT = ssl.create_default_context()
 
 
 class JiraClient:
@@ -36,7 +40,8 @@ class JiraClient:
         timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
         try:
-            async with httpx.AsyncClient() as client:
+            # Modify By Willie 2026/11/03:帶入 Windows 憑證存放區 SSL context
+            async with httpx.AsyncClient(verify=_SSL_CONTEXT) as client:
                 response = await client.request(
                     method=method,
                     url=url,
@@ -474,7 +479,8 @@ class JiraClient:
         """
         timeout = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
         try:
-            async with httpx.AsyncClient(follow_redirects=True) as client:
+            # Modify By Willie 2026/11/03:附件轉址至 api.media.atlassian.com 會經 SSL 檢查代理，帶入 Windows 憑證存放區 SSL context
+            async with httpx.AsyncClient(follow_redirects=True, verify=_SSL_CONTEXT) as client:
                 response = await client.get(
                     content_url,
                     auth=self.auth,
