@@ -10,8 +10,10 @@ import getpass
 import json
 import re
 import secrets
+import socket
 import ssl
 import string
+from urllib.parse import urlparse
 
 import certifi
 import pyodbc
@@ -147,21 +149,54 @@ def read_customer_info(conn_str):
         conn.close()
 
 
-async def serve(relay, code, conn_str, info, log=print, on_ready=None, on_query=None):
+async def open_relay(relay, fallback_ips, state, log):
+    """連到 relay。客戶機器的 DNS 解析不到 relay 網址（getaddrinfo failed）時，改直接連 fallback_ips；
+    TLS 驗證與 Host 標頭仍使用原網址，所以不必改客戶的 hosts 檔。連上的 IP 記在 state，重連時優先使用。"""
+    # ping_timeout 放寬到 60 秒：經 zrok 的客戶網路延遲較大，預設 20 秒曾在實測中途斷線
+    opts = dict(max_size=None, open_timeout=15, ping_interval=20, ping_timeout=60)
+    url = urlparse(relay)
+    if url.scheme == "wss":
+        opts["ssl"] = tls_context()
+    if not state.get("ip"):
+        try:
+            return await websockets.connect(relay, **opts)
+        except socket.gaierror as e:
+            if not fallback_ips:
+                raise
+            log(f"無法解析中繼伺服器網址（{e}），改用 IP 連線…")
+    ips = [state["ip"]] if state.get("ip") else []
+    ips += [ip for ip in fallback_ips if ip not in ips]
+    if url.scheme == "wss":
+        # 指定 host 時 websockets 不會自動帶 server_hostname，要明確給，否則會拿 IP 驗證憑證
+        opts["server_hostname"] = url.hostname
+    last = None
+    for ip in ips:
+        try:
+            ws = await websockets.connect(relay, host=ip, port=url.port or (443 if url.scheme == "wss" else 80), **opts)
+        except (OSError, asyncio.TimeoutError, websockets.exceptions.WebSocketException) as e:
+            last = e
+            continue
+        if state.get("ip") != ip:
+            log(f"已改用 IP {ip} 連上中繼伺服器")
+        state["ip"] = ip
+        return ws
+    raise last
+
+
+async def serve(relay, code, conn_str, info, log=print, on_ready=None, on_query=None, fallback_ips=()):
     """log：訊息輸出（CLI 為 print，圖形介面另行顯示）；on_ready：第一次連上 relay 後呼叫；
-    on_query：每收到一筆查詢呼叫（圖形介面用來重設閒置計時）。
+    on_query：每收到一筆查詢呼叫（圖形介面用來重設閒置計時）；fallback_ips：DNS 解析失敗時改連的 IP。
     連上後若中途斷線，以同一配對碼自動重連；第一次就連不上則直接拋出例外。
     查詢只能指定主庫（db=main）或其表單資料庫（db=wf），不能切到其他客戶的資料庫。"""
     conns = {"main": conn_str}
     if info.get("wf_database"):
         conns["wf"] = with_database(conn_str, info["wf_database"])
-    extra = {"ssl": tls_context()} if relay.startswith("wss://") else {}
+    state = {}
     connected = False
     while True:
         try:
-            # ping_timeout 放寬到 60 秒：經 zrok 的客戶網路延遲較大，預設 20 秒曾在實測中途斷線
-            async with websockets.connect(relay, max_size=None, open_timeout=15,
-                                          ping_interval=20, ping_timeout=60, **extra) as ws:
+            ws = await open_relay(relay, fallback_ips, state, log)
+            try:
                 await ws.send(json.dumps({"role": "agent", "code": code, "info": info}, ensure_ascii=False))
                 if not connected:
                     connected = True
@@ -175,6 +210,8 @@ async def serve(relay, code, conn_str, info, log=print, on_ready=None, on_query=
                         on_query()
                     await ws.send(json.dumps(await handle(json.loads(msg), conns, info, log), ensure_ascii=False))
                 reason = f"relay 關閉連線（代碼 {ws.close_code}）"
+            finally:
+                await ws.close()
         except (OSError, asyncio.TimeoutError, websockets.exceptions.WebSocketException) as e:
             if not connected:
                 raise

@@ -84,6 +84,7 @@ agent 保持長連線；MCP 端每次查詢開一條新連線。
   - 留空登入時：只有一個 EHRMS 庫就直接登入；多個時列出讓使用者確認；沒有 EHRMS 庫時請使用者選擇或手動輸入
   - 客戶名稱一律從客戶自己的 `HRMS_COMPANY` 讀取，**不可**把公司內的客戶名單（如 Custom_compare）打包進 exe，以免客戶機器上出現其他客戶資料
 - wss 連線另外載入內附的 certifi 根憑證：舊版 Windows 的系統根憑證過舊，連 zrok 會出現 `CERTIFICATE_VERIFY_FAILED ... unable to get local issuer certificate`（甲山林實測遇到）
+- 客戶機器 DNS 解析不到中繼網址（`[Errno 11002] getaddrinfo failed`，石梅化學 45049886 實測遇到）時，自動改連 `agent.ini` 的 `relay_ips`（預設 zrok 公開節點 `52.223.10.144,35.71.189.214`，畫面不顯示），TLS 驗證與 Host 仍用原網址，不必改客戶 hosts 檔；連上的 IP 在重連時優先使用。需要經 Proxy 才能上網的機器仍無法連線。zrok 節點 IP 若變更，改 `agent.ini` 即可，不必重新打包
 - 配對碼畫面顯示配對碼（右側「複製」按鈕，複製不含空白的 6 碼）、資料庫、表單資料庫、公司清單，以及每筆收到的查詢（含目標資料庫）與結果筆數
 - 「中斷連線」或 relay 斷線：回到登入畫面並顯示原因
 - 密碼以 `PWD={...}` 包住，含 `;`、`}` 等特殊字元也能正確傳遞

@@ -22,7 +22,9 @@ INI = APP_DIR / "agent.ini"
 # 打包時以 --add-data 放進 exe，執行時解壓到 sys._MEIPASS
 ICON = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "icon.ico"
 # 中繼伺服器預設為 zrok 固定網址（relay 跑在工程師電腦 8770，經 zrok 公開）
-DEFAULTS = {"server": ".", "user": "ehrms", "relay": "wss://ehrms-relay.shares.zrok.io"}
+# relay_ips：客戶機器 DNS 解析不到中繼網址時改連的 IP（zrok 公開節點，逗號分隔）；只在 agent.ini，畫面不顯示
+DEFAULTS = {"server": ".", "user": "ehrms", "relay": "wss://ehrms-relay.shares.zrok.io",
+            "relay_ips": "52.223.10.144,35.71.189.214"}
 IDLE_LIMIT = 60 * 60  # 秒，1 小時沒有任何查詢就中斷；每收到一筆查詢重新計時
 WARNING = "此工具僅提供查詢語法，不會更動資料庫資料，並會記錄查詢語法以供稽核"
 
@@ -182,6 +184,7 @@ class App:
             log=lambda m: self.events.put(("log", m)),
             on_ready=lambda: self.events.put(("ready", code, info)),
             on_query=lambda: self.events.put(("query",)),
+            fallback_ips=[ip.strip() for ip in values["relay_ips"].split(",") if ip.strip()],
         ))
         try:
             self.loop.run_until_complete(self.task)
