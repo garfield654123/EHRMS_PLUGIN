@@ -20,7 +20,7 @@ description: EHRMS Jira 維運單（Crisis 單）需求分析與處理分流。�
 
 例外：使用者**明確要求**查 DB 時才使用（例如指名「用 DB MCP 查」或問題明確屬於自家環境資料）。
 
-例外：使用者提供客戶端 EHRMS_Connect.exe 的**配對碼**時，可用 `ehrms-custom-mcp` 直接查詢該客戶的資料庫（每筆 SELECT 由使用者核准），流程見 `ehrms-custom-mcp` skill。沒有配對碼時仍提供 SQL 請客戶端執行。
+例外：使用者提供客戶端 EHRMS_Connect.exe 的**配對碼**時，可用 `ehrms-custom-mcp` 直接查詢該客戶的資料庫（每筆 SELECT 由使用者核准），使用規則內建在該 MCP。沒有配對碼時仍提供 SQL 請客戶端執行。
 
 `wiki_lookup`／`faq_lookup`／`bulletin_lookup`／`sop_lookup`／`task_lookup` 查的是自家維運知識庫
 （HRMS_WIKI／HRMS_FAQ／HRMS_BULLETIN／HRMS_FAQ_SOP／HRMS_TASK），不是客戶資料，不受上述禁令限制（同 `hrms_sys_rule` 的既有例外）。

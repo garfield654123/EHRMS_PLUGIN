@@ -61,6 +61,8 @@ class App:
         self.vars = {k: tk.StringVar(value=settings[k]) for k in DEFAULTS}
         self.vars["database"] = tk.StringVar()
         self.db_names = {}  # 下拉選項文字 -> 資料庫名稱
+        self.switch_names = {}  # 配對碼畫面的下拉選項文字 -> 資料庫名稱
+        self.session = None  # agent.serve 的連線狀態，用來切換資料庫
         self.password = tk.StringVar()
         self.status = tk.StringVar()
 
@@ -118,6 +120,18 @@ class App:
         self.copy_btn.pack(side="left", padx=(16, 0))
         self.info_var = tk.StringVar()
         ttk.Label(f, textvariable=self.info_var, justify="left").pack(anchor="w")
+        switch = ttk.Frame(f)
+        switch.pack(anchor="w", fill="x", pady=(8, 0))
+        ttk.Label(switch, text="查詢的資料庫").pack(side="left", padx=(0, 8))
+        self.switch_var = tk.StringVar()
+        self.switch_box = ttk.Combobox(switch, textvariable=self.switch_var, state="readonly", width=40)
+        self.switch_box.pack(side="left")
+        self.switch_btn = ttk.Button(switch, text="切換", width=6, command=self.switch_database)
+        self.switch_btn.pack(side="left", padx=(8, 0))
+        self.reload_btn = ttk.Button(switch, text="重新整理", width=8, command=self.reload_databases)
+        self.reload_btn.pack(side="left", padx=(8, 0))
+        self.switch_status = tk.StringVar()
+        ttk.Label(f, textvariable=self.switch_status, foreground="#b00020", wraplength=480).pack(anchor="w")
         self.remain_var = tk.StringVar()
         ttk.Label(f, textvariable=self.remain_var, foreground="#1a4d8f").pack(anchor="w", pady=(6, 0))
         ttk.Label(f, text="查詢紀錄").pack(anchor="w", pady=(10, 2))
@@ -178,6 +192,7 @@ class App:
             return
         code = agent.make_code()
         self.events.put(("status", "連線中繼伺服器中…"))
+        self.session = {}
         self.loop = asyncio.new_event_loop()
         self.task = self.loop.create_task(agent.serve(
             values["relay"], code, conn_str, info,
@@ -185,6 +200,7 @@ class App:
             on_ready=lambda: self.events.put(("ready", code, info)),
             on_query=lambda: self.events.put(("query",)),
             fallback_ips=[ip.strip() for ip in values["relay_ips"].split(",") if ip.strip()],
+            session=self.session,
         ))
         try:
             self.loop.run_until_complete(self.task)
@@ -196,6 +212,40 @@ class App:
         finally:
             self.loop.close()
             self.loop = self.task = None
+
+    # ---- 切換查詢的資料庫（連線建立後，同樣在背景執行緒）----
+
+    def set_switch_busy(self, busy):
+        for widget in (self.switch_btn, self.reload_btn):
+            widget.state(["disabled"] if busy else ["!disabled"])
+
+    def reload_databases(self):
+        if not self.session:
+            return
+        self.set_switch_busy(True)
+        threading.Thread(target=self.run_reload, args=(self.session,), daemon=True).start()
+
+    def run_reload(self, session):
+        try:
+            self.events.put(("database_list", agent.list_databases(session["target"][0])))
+        except Exception as e:
+            self.events.put(("switch_failed", f"讀取資料庫清單失敗：{e}"))
+
+    def switch_database(self):
+        name = self.switch_names.get(self.switch_var.get())
+        if not name or not self.session or name == self.session["target"][2]["database"]:
+            return
+        self.set_switch_busy(True)
+        self.switch_status.set(f"切換到 {name} 中…")
+        threading.Thread(target=self.run_switch, args=(self.session, self.loop, name), daemon=True).start()
+
+    def run_switch(self, session, loop, name):
+        try:
+            info = agent.switch_database(session, name)
+            asyncio.run_coroutine_threadsafe(agent.reregister(session), loop)
+            self.events.put(("switched", info))
+        except Exception as e:
+            self.events.put(("switch_failed", f"切換失敗，維持原資料庫：{e}"))
 
     def copy_code(self):
         self.root.clipboard_clear()
@@ -252,18 +302,50 @@ class App:
         else:
             self.status.set(f"偵測到 {len(ehrms)} 個 EHRMS 資料庫，請確認後按登入")
 
-    def on_ready(self, code, info):
-        self.code_var.set(f"{code[:3]} {code[3:]}")
+    def show_info(self, info):
         lines = [f"資料庫：{info['database']}（{info['server']}）",
                  f"表單資料庫：{info.get('wf_database') or '無'}"]
         lines += [f"公司：{c['code']} {c['name']}　統編 {c['sno']}（{c['status']}）" for c in info["companies"]]
         if "companies_error" in info:
             lines.append(info["companies_error"])
         self.info_var.set("\n".join(lines))
+
+    def on_ready(self, code, info):
+        self.code_var.set(f"{code[:3]} {code[3:]}")
+        self.show_info(info)
         self.deadline = time.monotonic() + IDLE_LIMIT
         self.cancel_reason = None
         self.login_frame.pack_forget()
         self.session_frame.pack(fill="both")
+        self.switch_status.set("")
+        self.reload_databases()
+
+    def on_database_list(self, found):
+        self.set_switch_busy(False)
+        if not self.session:
+            return
+        self.switch_names = {}
+        current = self.session["target"][2]["database"]
+        for d in found:
+            label = d["name"] + ("　" + d["company"] if d["company"] else "") + ("" if d["ehrms"] else "（非 EHRMS）")
+            self.switch_names[label] = d["name"]
+            if d["name"] == current:
+                self.switch_var.set(label)
+        self.switch_box["values"] = list(self.switch_names)
+
+    def on_switched(self, info):
+        self.set_switch_busy(False)
+        self.show_info(info)
+        self.switch_status.set("")
+        self.on_query()  # 切換也算有操作，重新計算閒置時間
+        self.on_log(f"已切換查詢的資料庫：{info['database']}。工程師需重新 connect 並確認客戶")
+
+    def on_switch_failed(self, text):
+        self.set_switch_busy(False)
+        self.switch_status.set(text)
+        for label, name in self.switch_names.items():
+            if self.session and name == self.session["target"][2]["database"]:
+                self.switch_var.set(label)
 
     def on_query(self):
         if self.deadline is not None:
@@ -278,6 +360,7 @@ class App:
     def on_failed(self, text):
         self.deadline = None
         self.cancel_reason = None
+        self.session = None
         self.set_busy(False)
         self.password.set("")
         self.session_frame.pack_forget()

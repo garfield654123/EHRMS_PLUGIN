@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0}</style>
+<title>ehrms-custom-mcp 連線原理</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* 版面概念：以時序圖為主體，五條生命線對應實際的五個元件，下方表格補每段連線的規格與排錯 */
+:root {
+  --bg: #f4f6f8; --panel: #ffffff; --band: #e4e9ee; --line: #5b6875; --life: #aab4be; --ink: #17212b; --quiet: #55626f;
+  --warn: #9a5b00; --warn-tint: #fbefd9; --key: #08776f; --key-tint: #dcf1ee;
+  --sans: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12181e; --panel: #1b232b; --band: #26313b; --line: #93a1ae; --life: #4d5a66; --ink: #edf2f6; --quiet: #a9b5c0;
+  --warn: #eeb65a; --warn-tint: #3a2c13; --key: #55cfc3; --key-tint: #143a38; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12181e; --panel: #1b232b; --band: #26313b; --line: #93a1ae; --life: #4d5a66; --ink: #edf2f6; --quiet: #a9b5c0;
+  --warn: #eeb65a; --warn-tint: #3a2c13; --key: #55cfc3; --key-tint: #143a38; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); }
+.page { max-width: 1240px; margin: 0 auto; padding-block: 28px 44px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { margin: 0 0 8px; font-size: 26px; font-weight: 700; text-wrap: balance; }
+h2 { margin: 34px 0 10px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+p { margin: 0 0 10px; max-width: 72ch; font-size: 15px; line-height: 1.7; }
+.lead { font-size: 16px; }
+.quiet { color: var(--quiet); font-size: 14px; }
+code { font-family: var(--mono); font-size: 0.9em; overflow-wrap: anywhere; }
+.scroll { overflow-x: auto; }
+svg { display: block; width: 100%; min-width: 980px; height: auto; font-family: var(--sans); }
+.band { fill: var(--band); }
+.band-label { fill: var(--ink); font-size: 13px; font-weight: 700; }
+.group { fill: var(--quiet); font-size: 13px; font-weight: 700; text-anchor: middle; }
+.lane { fill: var(--panel); stroke: var(--line); stroke-width: 1.25; }
+.lane-warn { fill: var(--warn-tint); stroke: var(--warn); stroke-width: 1.5; }
+.lane-name { fill: var(--ink); font-size: 13px; font-weight: 700; text-anchor: middle; }
+.life { stroke: var(--life); stroke-width: 1.25; stroke-dasharray: 3 4; }
+.msg { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.head { fill: var(--line); }
+.via { fill: var(--warn); }
+.label { fill: var(--ink); font-size: 12.5px; text-anchor: middle; }
+.wire { fill: var(--ink); font-family: var(--mono); font-weight: 500; font-size: 12px; text-anchor: middle; }
+.note { fill: var(--key-tint); stroke: var(--key); stroke-width: 1.25; }
+.note-text { fill: var(--ink); font-size: 12.5px; font-weight: 500; text-anchor: middle; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; min-width: 720px; border-collapse: collapse; background: var(--panel); font-size: 14px; line-height: 1.55; }
+th, td { padding: 10px 12px; border: 1px solid var(--band); text-align: left; vertical-align: top; }
+th { background: var(--band); font-weight: 700; }
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 32px; }
+.cols > div { min-width: 0; }
+.cols h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; }
+ul { margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.7; }
+@media (max-width: 640px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<main class="page">
+  <h1>ehrms-custom-mcp 連線原理</h1>
+  <p class="lead">工程師電腦和客戶機器不會直接互連。兩邊都往外連到 relay，靠客戶端畫面上的 6 碼配對碼配成一對。連客戶資料庫的是客戶機器上的 <code>EHRMS_Connect.exe</code>，帳密只留在那台機器的記憶體裡。</p>
+  <p class="quiet">目前為測試階段。內容依 2026-11-04 的 <code>servers/REMOTE_DB</code> 程式與 SPEC.md 整理。</p>
+
+  <h2>連線時序</h2>
+  <div class="scroll">
+    <svg viewBox="0 0 1200 950" role="img" aria-label="建立通道、配對與每筆查詢三個階段的連線時序圖">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0 0L10 5L0 10z"/></marker>
+      </defs>
+
+      <!-- 階段底色 -->
+      <rect class="band" x="10" y="74" width="1180" height="24" rx="4"/><text class="band-label" x="22" y="91">A　建立通道：客戶端登入時</text>
+      <rect class="band" x="10" y="308" width="1180" height="24" rx="4"/><text class="band-label" x="22" y="325">B　配對：工程師取得配對碼後</text>
+      <rect class="band" x="10" y="506" width="1180" height="24" rx="4"/><text class="band-label" x="22" y="523">C　每筆查詢</text>
+
+      <!-- 生命線 -->
+      <line class="life" x1="120" y1="62" x2="120" y2="935"/>
+      <line class="life" x1="390" y1="62" x2="390" y2="935"/>
+      <line class="life" x1="630" y1="62" x2="630" y2="935"/>
+      <line class="life" x1="880" y1="62" x2="880" y2="935"/>
+      <line class="life" x1="1100" y1="62" x2="1100" y2="935"/>
+
+      <!-- 元件 -->
+      <text class="group" x="255" y="20">工程師電腦</text>
+      <text class="group" x="630" y="20">第三方</text>
+      <text class="group" x="990" y="20">客戶端</text>
+      <rect class="lane" x="50" y="30" width="140" height="32" rx="6"/><text class="lane-name" x="120" y="51">mcp_server.py</text>
+      <rect class="lane" x="330" y="30" width="120" height="32" rx="6"/><text class="lane-name" x="390" y="51">relay.py</text>
+      <rect class="lane-warn" x="570" y="30" width="120" height="32" rx="6"/><text class="lane-name" x="630" y="51">zrok 節點</text>
+      <rect class="lane" x="800" y="30" width="160" height="32" rx="6"/><text class="lane-name" x="880" y="51">EHRMS_Connect.exe</text>
+      <rect class="lane" x="1040" y="30" width="120" height="32" rx="6"/><text class="lane-name" x="1100" y="51">客戶 MSSQL</text>
+
+      <!-- A -->
+      <path class="msg" d="M390 124H630" marker-end="url(#arrow)"/><text class="label" x="510" y="116">zrok2 主動連出，取得固定網址</text>
+      <path class="msg" d="M880 158H1100" marker-end="url(#arrow)"/><text class="label" x="990" y="150">用輸入的帳密登入（ODBC）</text>
+      <path class="msg" d="M1100 196H880" marker-end="url(#arrow)"/><text class="label" x="990" y="188">資料庫名稱、公司清單、統編</text>
+      <path class="msg" d="M880 236H390" marker-end="url(#arrow)"/><circle class="via" cx="630" cy="236" r="4"/><text class="wire" x="755" y="228">{role:"agent", code, info}</text>
+      <rect class="note" x="300" y="258" width="180" height="30" rx="6"/><text class="note-text" x="390" y="278">記下配對碼對應的連線</text>
+      <rect class="note" x="790" y="258" width="180" height="30" rx="6"/><text class="note-text" x="880" y="278">畫面顯示 6 碼配對碼</text>
+
+      <!-- B -->
+      <rect class="note" x="20" y="342" width="200" height="30" rx="6"/><text class="note-text" x="120" y="362">工程師把配對碼告訴 AI</text>
+      <path class="msg" d="M120 402H390" marker-end="url(#arrow)"/><text class="wire" x="255" y="394">{role:"client", code, probe:true}</text>
+      <path class="msg" d="M390 438H120" marker-end="url(#arrow)"/><text class="wire" x="255" y="430">{ok:true, info}</text>
+      <rect class="note" x="10" y="458" width="220" height="30" rx="6"/><text class="note-text" x="120" y="478">AI 列出客戶資訊，工程師確認</text>
+
+      <!-- C -->
+      <rect class="note" x="30" y="540" width="180" height="30" rx="6"/><text class="note-text" x="120" y="560">工程師核准 SQL</text>
+      <path class="msg" d="M120 600H390" marker-end="url(#arrow)"/><text class="label" x="255" y="592">開新連線，送出 id、sql、db</text>
+      <path class="msg" d="M390 638H880" marker-end="url(#arrow)"/><circle class="via" cx="630" cy="638" r="4"/><text class="wire" x="755" y="630">{id, sql, db}</text>
+      <path class="msg" d="M880 676H1100" marker-end="url(#arrow)"/><text class="label" x="990" y="668">開新連線，SHOWPLAN 只讀檢查</text>
+      <path class="msg" d="M880 714H1100" marker-end="url(#arrow)"/><text class="label" x="990" y="706">執行 SELECT</text>
+      <path class="msg" d="M1100 752H880" marker-end="url(#arrow)"/><text class="label" x="990" y="744">結果（最多回傳 500 筆）</text>
+      <path class="msg" d="M880 790H1100" marker-end="url(#arrow)"/><text class="label" x="990" y="782">ROLLBACK，關閉連線</text>
+      <path class="msg" d="M880 828H390" marker-end="url(#arrow)"/><circle class="via" cx="630" cy="828" r="4"/><text class="wire" x="755" y="820">{id, columns, rows, truncated}</text>
+      <path class="msg" d="M390 866H120" marker-end="url(#arrow)"/><text class="label" x="255" y="858">轉送結果，這條連線結束</text>
+      <rect class="note" x="30" y="888" width="180" height="30" rx="6"/><text class="note-text" x="120" y="908">轉成表格交給 AI</text>
+    </svg>
+  </div>
+  <p class="quiet">圓點表示訊息經過 zrok 節點。帳密不在任何送往 relay 的訊息裡；SQL、查詢結果與客戶資訊則會經過。</p>
+
+  <h2>四段連線</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>連線</th><th>發起方</th><th>通訊方式</th><th>加密</th><th>連線行為</th></tr></thead>
+      <tbody>
+        <tr><td><code>mcp_server.py</code> → <code>relay.py</code></td><td>工程師電腦</td><td>WebSocket，<code>ws://127.0.0.1:8770</code></td><td>無，只在本機</td><td>每筆查詢開一條新連線，等結果最多 60 秒</td></tr>
+        <tr><td><code>zrok2</code> → zrok 節點</td><td>工程師電腦</td><td>zrok 分享 <code>public:ehrms-relay</code>，把本機 8770 公開出去</td><td>由 zrok 處理</td><td>關機或程序結束後，所有客戶端都連不上</td></tr>
+        <tr><td><code>EHRMS_Connect.exe</code> → zrok 節點</td><td>客戶機器</td><td><code>wss://ehrms-relay.shares.zrok.io</code>，port 443</td><td>TLS，在 zrok 節點解開</td><td>保持長連線，每 20 秒 ping，60 秒沒回應算斷線，斷線後每 5 秒以同一配對碼重連</td></tr>
+        <tr><td><code>EHRMS_Connect.exe</code> → 客戶 MSSQL</td><td>客戶機器</td><td>ODBC，驅動 <code>{SQL Server}</code>；DB 主機預設 <code>.</code>（本機）</td><td>連線字串未設定加密</td><td>每筆查詢開新連線，連線逾時 10 秒、查詢逾時 30 秒</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>客戶機器的條件</h2>
+  <div class="cols">
+    <div>
+      <h3>需要</h3>
+      <ul>
+        <li>工程師能用 Splashtop 或 AnyDesk 操作這台機器</li>
+        <li>能連到客戶 MSSQL，並有資料庫帳號，預設帳號 <code>ehrms</code></li>
+        <li>能往外連 port 443</li>
+        <li>帳號要有 SHOWPLAN 權限，否則查詢都會被拒絕</li>
+      </ul>
+    </div>
+    <div>
+      <h3>不需要</h3>
+      <ul>
+        <li>開 inbound port：客戶端只主動往外連</li>
+        <li>安裝程式：單一 exe，約 9 MB</li>
+        <li>安裝資料庫驅動：<code>{SQL Server}</code> 是 Windows 內建</li>
+        <li>較新的作業系統：exe 以 Python 3.8 打包，以支援 Windows Server 2012、2008 R2</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>連不上時怎麼判斷</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>看到的訊息</th><th>原因</th><th>處理方式</th></tr></thead>
+      <tbody>
+        <tr><td><code>資料庫連線失敗</code></td><td>帳密、DB 主機或資料庫名稱有誤</td><td>核對輸入值，資料庫可按「偵測」列出</td></tr>
+        <tr><td><code>[Errno 11002] getaddrinfo failed</code></td><td>客戶機器 DNS 解析不到中繼網址</td><td>換新版 exe，會自動改連 <code>agent.ini</code> 的 <code>relay_ips</code></td></tr>
+        <tr><td><code>CERTIFICATE_VERIFY_FAILED</code></td><td>舊版 Windows 的根憑證過舊</td><td>目前版本已內附 certifi 根憑證；舊版要換新</td></tr>
+        <tr><td><code>Error loading Python DLL</code></td><td>exe 不是用 Python 3.8 打包，舊版 Windows 無法執行</td><td>用 Python 3.8 重新打包</td></tr>
+        <tr><td><code>無法連到 relay</code></td><td>工程師電腦的 relay 沒有在執行</td><td>執行 <code>start-relay.ps1</code></td></tr>
+        <tr><td><code>找不到配對碼 … 的客戶端</code></td><td>exe 已關閉或中斷，或 1 小時沒有查詢而自動中斷</td><td>在客戶端重新登入，改用新的配對碼</td></tr>
+        <tr><td>要經 Proxy 才能上網</td><td>客戶端目前不支援 Proxy</td><td>改回提供 SQL，請客戶端執行後貼回</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+</html>

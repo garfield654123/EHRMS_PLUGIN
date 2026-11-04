@@ -32,7 +32,7 @@ MCP 名稱：`ehrms-custom-mcp`（程式目錄 `servers/REMOTE_DB`）。
 ## 使用流程
 
 1. 工程師用 Splashtop 在客戶機器執行 `EHRMS_Connect.exe`，輸入資料庫名稱、帳號、密碼後登入。連上 DB 與 relay 後才顯示 6 碼數字配對碼
-2. 工程師把配對碼告訴 AI，AI 呼叫 `connect(code, expected_sno)`，取得客戶資訊
+2. 工程師把配對碼告訴 AI，AI 呼叫 `connect(code)`，取得客戶資訊
 3. **確認客戶**：AI 把資料庫名稱、SQL Server、主機、HRMS_COMPANY 公司清單列給工程師，確認是正確客戶後才開始查詢
 4. AI 呼叫 `query(sql, reason)`，Claude Code 跳出核准提示並顯示完整 SQL，**由工程師審核**
 5. 核准後經 relay 送到 agent 執行，結果以 Markdown 表格回到 AI
@@ -51,7 +51,7 @@ MCP 名稱：`ehrms-custom-mcp`（程式目錄 `servers/REMOTE_DB`）。
 `connect` 的檢查：
 
 - 資料庫名稱不是 8 碼數字時，提示要特別確認
-- 有給 `expected_sno`（例如 Jira 單上的客戶統編）時，與資料庫名稱及所有公司統編比對；都不符就警告可能連錯客戶
+- 不比對工單統編：公司可能合併過，統編不同不代表連錯，由工程師看客戶資訊判斷
 - 讀取 HRMS_COMPANY 失敗時（例如非 EHRMS 資料庫），仍可連線，但會附上錯誤訊息
 - 每次 `query` 都會比對資料庫名稱是否與 connect 時相同，不同就要求重新 connect；結果開頭標示客戶資料庫
 
@@ -86,6 +86,10 @@ agent 保持長連線；MCP 端每次查詢開一條新連線。
 - wss 連線另外載入內附的 certifi 根憑證：舊版 Windows 的系統根憑證過舊，連 zrok 會出現 `CERTIFICATE_VERIFY_FAILED ... unable to get local issuer certificate`（甲山林實測遇到）
 - 客戶機器 DNS 解析不到中繼網址（`[Errno 11002] getaddrinfo failed`，石梅化學 45049886 實測遇到）時，自動改連 `agent.ini` 的 `relay_ips`（預設 zrok 公開節點 `52.223.10.144,35.71.189.214`，畫面不顯示），TLS 驗證與 Host 仍用原網址，不必改客戶 hosts 檔；連上的 IP 在重連時優先使用。需要經 Proxy 才能上網的機器仍無法連線。zrok 節點 IP 若變更，改 `agent.ini` 即可，不必重新打包
 - 配對碼畫面顯示配對碼（右側「複製」按鈕，複製不含空白的 6 碼）、資料庫、表單資料庫、公司清單，以及每筆收到的查詢（含目標資料庫）與結果筆數
+- 配對碼畫面可切換查詢的資料庫：下拉選單列出帳號有權限、線上的使用者資料庫（含備份庫與 `_WF`，排除系統庫），「重新整理」重讀清單，配對碼不變
+  - 先連新資料庫並讀取客戶資訊，成功才切換；失敗維持原資料庫並顯示原因
+  - 切換後 agent 重連 relay 更新客戶資訊。工程師端下一筆 `query` 會收到「配對碼對應的資料庫已改變」，要重新 `connect` 並確認客戶；切換過程中收到的查詢一律拒絕
+  - `main`、`wf` 與跨庫限制都以切換後的資料庫為準，一次仍只能查一個資料庫與其 `_WF`
 - 「中斷連線」或 relay 斷線：回到登入畫面並顯示原因
 - 密碼以 `PWD={...}` 包住，含 `;`、`}` 等特殊字元也能正確傳遞
 
@@ -108,7 +112,7 @@ py -3.8 -m PyInstaller --noconfirm --onefile --noconsole --name EHRMS_Connect --
 
 | 工具 | 參數 | 說明 |
 |---|---|---|
-| `connect` | `code`、`expected_sno`（選填） | 以配對碼連線並回傳客戶資訊供確認；配對碼與客戶資訊存在 MCP 程序記憶體中 |
+| `connect` | `code` | 以配對碼連線並回傳客戶資訊供確認；配對碼與客戶資訊存在 MCP 程序記憶體中 |
 | `query` | `sql`、`reason`、`database`（選填） | 執行單一 SELECT。`reason` 讓工程師核准時判斷用途。`database`：`main`（預設，客戶主資料庫＝統編）或 `wf`（表單資料庫＝統編_WF）。逾時 60 秒 |
 
 ### 表單資料庫（統編_WF）
@@ -128,7 +132,7 @@ py -3.8 -m PyInstaller --noconfirm --onefile --noconsole --name EHRMS_Connect --
 ### 客戶端警示與稽核紀錄
 
 - 登入與配對碼畫面頂端以紅字顯示：「此工具僅提供查詢語法，不會更動資料庫資料，並會記錄查詢語法以供稽核」
-- 目前查詢語法只顯示在客戶端畫面，**不寫本機檔案**；集中寫入資料庫的稽核表待與主管確認後實作（階段 2）。在那之前，紅字中「會記錄查詢語法以供稽核」尚未有持久化的紀錄
+- 目前查詢語法只顯示在客戶端畫面，**不寫本機檔案**。稽核表 `HRMS_CUSTOM_MCP_LOG` 已在 172.19.5.171 建立，但程式尚未寫入（階段 2）。在那之前，紅字中「會記錄查詢語法以供稽核」尚未有持久化的紀錄
 
 ## agent 端限制（不依賴人工審核的最後防線）
 
@@ -217,35 +221,23 @@ claude mcp add ehrms-custom-mcp --scope user -e REMOTE_DB_RELAY=ws://中繼機�
 
 ## 後續階段
 
+員工資料保護、LOG 紀錄與資料庫帳號控管的規格見 `docs/protection-spec.md`；架構圖與連線說明見 `docs/architecture.html`、`docs/connection.html`。
+
 | 階段 | 內容 | 前置條件 |
 |---|---|---|
 | 1 ✅ | MVP：relay／agent／MCP 跑通，agent 端 SELECT 檢查 | — |
-| 2 | 查詢紀錄寫入 172.19.5.171（與 EHRMS-jira-mcp 同一資料庫，另開專用帳號） | 171 建表與 INSERT 權限 |
+| 2 | 查詢紀錄寫入 172.19.5.171 的 `HRMS_CUSTOM_MCP_LOG`（表已建立，另開專用帳號）；客戶資料庫紀錄待決定；敏感欄位保護；客戶端專用帳號 | 171 INSERT 專用帳號；客戶同意 |
 | 3 ✅ | 客戶端圖形介面並打包成單一 exe（`EHRMS_Connect.exe`） | — |
 | 4 | 資安：WSS＋正式憑證、工程師端 token、配對碼時效與嘗試次數限制、只允許內網 IP 的 MCP 端、Proxy 支援、斷線重連 | 資安與網管同意 |
 | 5 | relay 對外開放（公司 DMZ 對外 443 對應，或核准的對外通道服務），實際客戶試用 | 公開網域、憑證、網管設定 |
 | 6 | MCP 加入 plugin 正式發佈 | 階段 4、5 完成 |
 
-使用方式已寫成 `skills/ehrms-custom-mcp/SKILL.md`；`context.md` 與 `crisis-triage` 已加上「使用者提供配對碼時可改用 ehrms-custom-mcp」的例外，沒有配對碼時仍維持提供 SQL 請客戶端執行。
-| 之後 | 主管／客戶端核准、敏感欄位遮罩 | 視需求 |
+使用規則內建在 `mcp_server.py`：整體流程放 server instructions（每次對話都載入，要保持精簡），語法限制放工具說明，錯誤處理放錯誤訊息。`skills/ehrms-custom-mcp/SKILL.md` 只保留觸發條件與指向 MCP 的說明。`context.md` 與 `crisis-triage` 已加上「使用者提供配對碼時可改用 ehrms-custom-mcp」的例外，沒有配對碼時仍維持提供 SQL 請客戶端執行。
+| 之後 | 主管／客戶端核准 | 視需求 |
 
-### 階段 2 紀錄表草案
+### 階段 2 紀錄表
 
-```sql
-CREATE TABLE HRMS_REMOTE_QUERY_LOG (
-    LOG_ID       INT IDENTITY(1,1) PRIMARY KEY,
-    REQUEST_ID   VARCHAR(36)    NOT NULL,
-    PAIR_CODE    VARCHAR(10)    NOT NULL,
-    JIRA_KEY     VARCHAR(30)    NULL,
-    REQUESTER    VARCHAR(100)   NOT NULL,
-    REASON       NVARCHAR(1000) NULL,
-    SQL_TEXT     NVARCHAR(MAX)  NOT NULL,
-    STATUS       VARCHAR(20)    NOT NULL,  -- EXECUTED / FAILED / TIMEOUT
-    ROW_COUNT    INT            NULL,
-    ERROR_MSG    NVARCHAR(1000) NULL,
-    CREATE_TIME  DATETIME       NOT NULL DEFAULT GETDATE()
-)
-```
+定義見 `hrms_custom_mcp_log.sql`，欄位與寫入方式見 `docs/protection-spec.md`。
 
 只記錄語法與筆數，**不存查詢結果**，避免紀錄表本身成為個資外洩點。
 

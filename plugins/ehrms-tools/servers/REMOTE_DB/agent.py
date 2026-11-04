@@ -94,8 +94,15 @@ def run_select(conn_str, sql, allowed_dbs):
 
 
 def detect_databases(server, user, password):
-    """列出這台 SQL Server 上可存取的使用者資料庫，EHRMS 客戶庫（名稱為 8 碼統編、有 HRMS_COMPANY）排前面。"""
-    conn = pyodbc.connect(build_conn_str(server, "master", user, password), timeout=10)
+    """登入前偵測資料庫。統編_WF 是同一客戶的表單資料庫，登入主庫後可查，不另列選項。"""
+    found = list_databases(build_conn_str(server, "master", user, password))
+    names = {d["name"].upper() for d in found}
+    return [d for d in found if not (re.fullmatch(r"\d{8}_WF", d["name"], re.I) and d["name"][:8] in names)]
+
+
+def list_databases(conn_str):
+    """列出這台 SQL Server 上可存取的使用者資料庫（排除系統庫），EHRMS 客戶庫（名稱為 8 碼統編、有 HRMS_COMPANY）排前面。"""
+    conn = pyodbc.connect(with_database(conn_str, "master"), timeout=10)
     try:
         cur = conn.cursor()
         cur.execute(
@@ -117,9 +124,6 @@ def detect_databases(server, user, password):
             found.append(item)
     finally:
         conn.close()
-    # 統編_WF 是同一客戶的表單資料庫，登入主庫後可切換，不另列選項
-    names = {d["name"].upper() for d in found}
-    found = [d for d in found if not (re.fullmatch(r"\d{8}_WF", d["name"], re.I) and d["name"][:8] in names)]
     found.sort(key=lambda d: (not d["ehrms"], not re.fullmatch(r"\d{8}", d["name"]), d["name"]))
     return found
 
@@ -183,21 +187,53 @@ async def open_relay(relay, fallback_ips, state, log):
     raise last
 
 
-async def serve(relay, code, conn_str, info, log=print, on_ready=None, on_query=None, fallback_ips=()):
-    """log：訊息輸出（CLI 為 print，圖形介面另行顯示）；on_ready：第一次連上 relay 後呼叫；
-    on_query：每收到一筆查詢呼叫（圖形介面用來重設閒置計時）；fallback_ips：DNS 解析失敗時改連的 IP。
-    連上後若中途斷線，以同一配對碼自動重連；第一次就連不上則直接拋出例外。
-    查詢只能指定主庫（db=main）或其表單資料庫（db=wf），不能切到其他客戶的資料庫。"""
+def set_database(session, conn_str, info):
+    """更新連線目前查詢的資料庫。conns 與 info 一起換，查詢開始時取得的一定是同一個資料庫的設定。"""
     conns = {"main": conn_str}
     if info.get("wf_database"):
         conns["wf"] = with_database(conn_str, info["wf_database"])
+    session["target"] = (conn_str, conns, info)
+
+
+def switch_database(session, name):
+    """切換查詢的資料庫（在背景執行緒呼叫）：先確認新資料庫可連線，成功才切換，失敗維持原資料庫。
+    只能切到 list_databases 列出的資料庫，系統庫不在其中。切換完要呼叫 reregister。"""
+    conn_str = session["target"][0]
+    if name not in {d["name"] for d in list_databases(conn_str)}:
+        raise ValueError(f"無法切換到 {name}：不存在、未上線、沒有權限，或是系統資料庫")
+    new_conn_str = with_database(conn_str, name)
+    info = read_customer_info(new_conn_str)
+    session["switching"] = True  # relay 更新前先擋查詢，避免工程師以為還在查舊資料庫
+    set_database(session, new_conn_str, info)
+    return info
+
+
+async def reregister(session):
+    """切換後讓 serve 重新登記：relay 只在連線時記客戶資訊，要重連才會更新。
+    工程師端下一筆查詢會發現資料庫已改變，要求重新 connect 並確認客戶。"""
+    session["reregister"] = True
+    ws = session.get("ws")
+    if ws:
+        await ws.close()
+
+
+async def serve(relay, code, conn_str, info, log=print, on_ready=None, on_query=None, fallback_ips=(), session=None):
+    """log：訊息輸出（CLI 為 print，圖形介面另行顯示）；on_ready：第一次連上 relay 後呼叫；
+    on_query：每收到一筆查詢呼叫（圖形介面用來重設閒置計時）；fallback_ips：DNS 解析失敗時改連的 IP；
+    session：連線狀態，傳入後可用 switch_database、reregister 切換資料庫。
+    連上後若中途斷線，以同一配對碼自動重連；第一次就連不上則直接拋出例外。
+    查詢只能指定目前資料庫（db=main）或其表單資料庫（db=wf），不能跨到其他資料庫。"""
+    session = {} if session is None else session
+    set_database(session, conn_str, info)
     state = {}
     connected = False
     while True:
         try:
             ws = await open_relay(relay, fallback_ips, state, log)
+            session["ws"] = ws
             try:
-                await ws.send(json.dumps({"role": "agent", "code": code, "info": info}, ensure_ascii=False))
+                await ws.send(json.dumps({"role": "agent", "code": code, "info": session["target"][2]}, ensure_ascii=False))
+                session["switching"] = False
                 if not connected:
                     connected = True
                     if on_ready:
@@ -208,19 +244,26 @@ async def serve(relay, code, conn_str, info, log=print, on_ready=None, on_query=
                 async for msg in ws:
                     if on_query:
                         on_query()
-                    await ws.send(json.dumps(await handle(json.loads(msg), conns, info, log), ensure_ascii=False))
+                    await ws.send(json.dumps(await handle(json.loads(msg), session, log), ensure_ascii=False))
                 reason = f"relay 關閉連線（代碼 {ws.close_code}）"
             finally:
+                session["ws"] = None
                 await ws.close()
         except (OSError, asyncio.TimeoutError, websockets.exceptions.WebSocketException) as e:
             if not connected:
                 raise
             reason = f"{type(e).__name__}：{e}"
+        if session.pop("reregister", False):
+            continue
         log(f"與 relay 的連線中斷（{reason}），5 秒後自動重連…")
         await asyncio.sleep(5)
 
 
-async def handle(req, conns, info, log):
+async def handle(req, session, log):
+    _, conns, info = session["target"]
+    if session.get("switching"):
+        log("→ 拒絕：資料庫切換中")
+        return {"id": req["id"], "error": "客戶端正在切換資料庫，請重新 connect 並確認客戶"}
     db = req.get("db") or "main"
     log(f"收到查詢（{info['wf_database'] if db == 'wf' else info['database']}）：\n{req['sql']}")
     try:

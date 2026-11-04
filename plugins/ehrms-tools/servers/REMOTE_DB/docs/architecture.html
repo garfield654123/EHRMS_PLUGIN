@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0}</style>
+<title>ehrms-custom-mcp 架構圖</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* 版面概念：由左到右的網路邊界圖，每個區塊是一個信任範圍，規劃中的防護用同一個青綠色虛線標示 */
+:root {
+  --bg: #f4f6f8; --panel: #ffffff; --zone: #e9edf1; --line: #5b6875; --ink: #17212b; --quiet: #55626f;
+  --plan: #08776f; --plan-tint: #dcf1ee; --warn: #9a5b00; --warn-tint: #fbefd9;
+  --sans: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12181e; --panel: #1b232b; --zone: #222c35; --line: #93a1ae; --ink: #edf2f6; --quiet: #a9b5c0;
+  --plan: #55cfc3; --plan-tint: #143a38; --warn: #eeb65a; --warn-tint: #3a2c13; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12181e; --panel: #1b232b; --zone: #222c35; --line: #93a1ae; --ink: #edf2f6; --quiet: #a9b5c0;
+  --plan: #55cfc3; --plan-tint: #143a38; --warn: #eeb65a; --warn-tint: #3a2c13; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); }
+.page { max-width: 1440px; margin: 0 auto; padding-block: 28px 36px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { margin: 0 0 6px; font-size: 26px; font-weight: 700; text-wrap: balance; }
+.sub { margin: 0 0 18px; color: var(--quiet); font-size: 15px; }
+.scroll { overflow-x: auto; }
+svg { display: block; width: 100%; min-width: 1120px; height: auto; font-family: var(--sans); }
+.zone { fill: var(--zone); }
+.zone-warn { fill: var(--warn-tint); }
+.zone-label { fill: var(--quiet); font-size: 14px; font-weight: 700; }
+.box { fill: var(--panel); stroke: var(--line); stroke-width: 1.25; }
+.box-warn { fill: var(--panel); stroke: var(--warn); stroke-width: 1.5; }
+.box-plan { fill: var(--plan-tint); stroke: var(--plan); stroke-width: 2; stroke-dasharray: 6 4; }
+.name { fill: var(--ink); font-size: 15px; font-weight: 700; text-anchor: middle; }
+.text { fill: var(--ink); font-size: 13px; text-anchor: middle; }
+.note { fill: var(--quiet); font-size: 12px; text-anchor: middle; }
+.mono { font-family: var(--mono); font-weight: 500; }
+.warn-text { fill: var(--warn); font-size: 12px; font-weight: 500; text-anchor: middle; }
+.plan-text { fill: var(--plan); font-size: 12px; font-weight: 700; }
+.wire { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.wire-plan { fill: none; stroke: var(--plan); stroke-width: 2; stroke-dasharray: 6 4; }
+.head { fill: var(--line); }
+.head-plan { fill: var(--plan); }
+.step { fill: var(--ink); }
+.step-text { fill: var(--panel); font-size: 12px; font-weight: 700; text-anchor: middle; }
+.step-plan { fill: var(--plan); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 14px 0 22px; color: var(--quiet); font-size: 14px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 26px; height: 14px; border-radius: 3px; border: 1.5px solid var(--line); background: var(--panel); flex: none; }
+.sw-plan { border: 2px dashed var(--plan); background: var(--plan-tint); }
+.sw-warn { border-color: var(--warn); background: var(--warn-tint); }
+.flow { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; counter-reset: s; }
+.flow li { counter-increment: s; font-size: 14px; line-height: 1.55; min-width: 0; }
+.flow li::before { content: counter(s); display: inline-flex; width: 22px; height: 22px; margin-right: 7px; border-radius: 50%; align-items: center; justify-content: center;
+  background: var(--ink); color: var(--panel); font-size: 12px; font-weight: 700; }
+.flow li.plan::before { background: var(--plan); }
+.flow b { font-weight: 700; }
+@media (max-width: 900px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .flow { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<main class="page">
+  <h1>ehrms-custom-mcp 架構圖</h1>
+  <p class="sub">客戶端與工程師端都只主動往外連，客戶不需開 inbound port。青綠色虛線是接下來要加的三項防護。</p>
+
+  <div class="scroll">
+    <svg viewBox="0 0 1360 560" role="img" aria-label="工程師電腦經 relay 與 zrok 連到客戶機器的查詢架構，以及規劃中的員工資料遮罩、LOG 紀錄與資料庫帳號控管">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0 0L10 5L0 10z"/></marker>
+        <marker id="arrow-plan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="head-plan" d="M0 0L10 5L0 10z"/></marker>
+      </defs>
+
+      <!-- 信任範圍 -->
+      <rect class="zone" x="20" y="60" width="160" height="300" rx="10"/>
+      <text class="zone-label" x="36" y="88">外部 AI 服務</text>
+      <rect class="zone" x="200" y="60" width="520" height="300" rx="10"/>
+      <text class="zone-label" x="216" y="88">工程師電腦</text>
+      <rect class="zone-warn" x="740" y="60" width="160" height="300" rx="10"/>
+      <text class="zone-label" x="756" y="88">第三方通道</text>
+      <rect class="zone" x="920" y="60" width="420" height="480" rx="10"/>
+      <text class="zone-label" x="936" y="88">客戶機器與客戶資料庫</text>
+      <rect class="zone" x="200" y="392" width="520" height="148" rx="10"/>
+      <text class="zone-label" x="216" y="420">公司內網</text>
+
+      <!-- 主流程：上線 SQL 往右，下線結果往左 -->
+      <g>
+        <path class="wire" d="M164 185H216" marker-end="url(#arrow)"/><path class="wire" d="M216 225H164" marker-end="url(#arrow)"/>
+        <path class="wire" d="M356 185H392" marker-end="url(#arrow)"/><path class="wire" d="M392 225H356" marker-end="url(#arrow)"/>
+        <path class="wire" d="M532 185H568" marker-end="url(#arrow)"/><path class="wire" d="M568 225H532" marker-end="url(#arrow)"/>
+        <path class="wire" d="M704 185H756" marker-end="url(#arrow)"/><path class="wire" d="M756 225H704" marker-end="url(#arrow)"/>
+        <path class="wire" d="M884 185H936" marker-end="url(#arrow)"/><path class="wire" d="M936 225H884" marker-end="url(#arrow)"/>
+        <path class="wire" d="M1156 185H1188" marker-end="url(#arrow)"/><path class="wire" d="M1188 225H1156" marker-end="url(#arrow)"/>
+      </g>
+      <text class="note" x="190" y="176">SQL</text><text class="note" x="190" y="244">結果</text>
+      <text class="note" x="910" y="176">wss 443</text>
+
+      <!-- AI -->
+      <rect class="box" x="36" y="130" width="128" height="120" rx="8"/>
+      <text class="name" x="100" y="174">Claude 模型</text>
+      <text class="text" x="100" y="198">產生 SELECT</text>
+      <text class="text" x="100" y="218">分析查詢結果</text>
+      <text class="warn-text" x="100" y="290">遮罩上線後</text>
+      <text class="warn-text" x="100" y="308">只收到遮罩後結果</text>
+
+      <!-- 工程師電腦 -->
+      <rect class="box" x="216" y="130" width="140" height="120" rx="8"/>
+      <text class="name" x="286" y="174">Claude Code</text>
+      <text class="text" x="286" y="198">工程師逐筆</text>
+      <text class="text" x="286" y="218">核准 SQL</text>
+
+      <rect class="box" x="392" y="130" width="140" height="120" rx="8"/>
+      <text class="name mono" x="462" y="174" style="font-size:14px">mcp_server.py</text>
+      <text class="text" x="462" y="198">connect、query</text>
+      <text class="text" x="462" y="218">確認客戶統編</text>
+
+      <rect class="box" x="568" y="130" width="136" height="120" rx="8"/>
+      <text class="name mono" x="636" y="174" style="font-size:14px">relay.py</text>
+      <text class="text" x="636" y="198">依配對碼轉送</text>
+      <text class="note mono" x="636" y="218">127.0.0.1:8770</text>
+
+      <!-- zrok -->
+      <rect class="box-warn" x="756" y="130" width="128" height="120" rx="8"/>
+      <text class="name" x="820" y="162">zrok 節點</text>
+      <text class="text" x="820" y="186">在此解開 HTTPS</text>
+      <text class="note mono" x="820" y="212">ehrms-relay.</text>
+      <text class="note mono" x="820" y="230">shares.zrok.io</text>
+      <text class="warn-text" x="820" y="290">遮罩上線後，這裡</text>
+      <text class="warn-text" x="820" y="308">只看到遮罩後結果</text>
+
+      <!-- agent -->
+      <rect class="box" x="936" y="100" width="220" height="256" rx="8"/>
+      <text class="name mono" x="1046" y="126" style="font-size:14px">EHRMS_Connect.exe</text>
+      <rect class="box" x="948" y="138" width="196" height="44" rx="6"/>
+      <text class="text" x="1046" y="165">SHOWPLAN 只讀檢查</text>
+      <rect class="box" x="948" y="190" width="196" height="44" rx="6"/>
+      <text class="text" x="1046" y="217">執行 SELECT，再 ROLLBACK</text>
+      <rect class="box-plan" x="948" y="242" width="196" height="50" rx="6"/>
+      <text class="text" x="1046" y="263" style="font-weight:700">防護一：員工資料遮罩</text>
+      <text class="plan-text" x="1046" y="281" text-anchor="middle">資料離開客戶機器前處理</text>
+      <rect class="box-plan" x="948" y="300" width="196" height="44" rx="6"/>
+      <text class="text" x="1046" y="327" style="font-weight:700">防護二：寫入 LOG</text>
+
+      <!-- 客戶 DB -->
+      <rect class="box" x="1188" y="130" width="136" height="120" rx="8"/>
+      <text class="name" x="1256" y="174">客戶 MSSQL</text>
+      <text class="text" x="1256" y="198">主庫（統編）</text>
+      <text class="text" x="1256" y="218">表單庫（_WF）</text>
+      <path class="wire-plan" d="M1256 262V250" marker-end="url(#arrow-plan)"/>
+      <rect class="box-plan" x="1188" y="262" width="136" height="88" rx="8"/>
+      <text class="text" x="1256" y="284" style="font-weight:700">防護三：帳號控管</text>
+      <text class="text" x="1256" y="304">只給 SELECT 權限</text>
+      <text class="plan-text" x="1256" y="322" text-anchor="middle">另加 SHOWPLAN</text>
+      <text class="plan-text" x="1256" y="339" text-anchor="middle">LOG 表僅 INSERT</text>
+
+      <!-- LOG -->
+      <path class="wire-plan" d="M1046 356V430" marker-end="url(#arrow-plan)"/>
+      <text class="plan-text" x="1058" y="396">每筆查詢</text>
+      <rect class="box-plan" x="936" y="430" width="388" height="94" rx="8"/>
+      <text class="name" x="1130" y="456">客戶資料庫 LOG 表</text>
+      <text class="note mono" x="1130" y="478">HRMS_CUSTOM_MCP_LOG</text>
+      <text class="text" x="1130" y="504">agent 用獨立連線寫入，客戶可自行查核</text>
+
+      <path class="wire-plan" d="M462 250V430" marker-end="url(#arrow-plan)"/>
+      <text class="plan-text" x="474" y="378">每筆查詢</text>
+      <rect class="box-plan" x="392" y="430" width="312" height="94" rx="8"/>
+      <text class="name" x="548" y="456">.171 LOG 表（172.19.5.171）</text>
+      <text class="note mono" x="548" y="478">HRMS_CUSTOM_MCP_LOG</text>
+      <text class="text" x="548" y="504">MCP 端寫入，集中稽核，不存查詢結果</text>
+
+      <path class="wire-plan" d="M704 477H936" marker-start="url(#arrow-plan)" marker-end="url(#arrow-plan)"/>
+      <text class="plan-text" x="820" y="466" text-anchor="middle">同一 REQUEST_ID 對帳</text>
+
+      <!-- 步驟編號 -->
+      <g>
+        <circle class="step" cx="36" cy="130" r="11"/><text class="step-text" x="36" y="134">1</text>
+        <circle class="step" cx="216" cy="130" r="11"/><text class="step-text" x="216" y="134">2</text>
+        <circle class="step" cx="392" cy="130" r="11"/><text class="step-text" x="392" y="134">3</text>
+        <circle class="step" cx="568" cy="130" r="11"/><text class="step-text" x="568" y="134">4</text>
+        <circle class="step" cx="948" cy="138" r="11"/><text class="step-text" x="948" y="142">5</text>
+        <circle class="step step-plan" cx="948" cy="242" r="11"/><text class="step-text" x="948" y="246">6</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw"></i>現有元件</span>
+    <span><i class="sw sw-plan"></i>規劃中的防護</span>
+    <span><i class="sw sw-warn"></i>第三方，看得到 SQL 與查詢結果</span>
+  </div>
+
+  <ol class="flow">
+    <li><b>AI 產生 SELECT</b>，並附上查詢目的。</li>
+    <li><b>工程師核准</b>，Claude Code 顯示完整 SQL。</li>
+    <li><b>MCP 送出查詢</b>，規劃同時寫入 .171。</li>
+    <li><b>relay 依配對碼轉送</b>，經 zrok 到客戶端。</li>
+    <li><b>客戶端檢查並執行</b>，非 SELECT 或跨庫都拒絕；規劃改用只有 SELECT 權限的帳號。</li>
+    <li class="plan"><b>遮罩後回傳</b>，規劃同時寫入客戶資料庫。</li>
+  </ol>
+</main>
+</html>
