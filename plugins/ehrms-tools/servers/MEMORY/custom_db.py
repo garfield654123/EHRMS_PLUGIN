@@ -41,3 +41,22 @@ def upsert_file(company_sno, branch_name, custom_path, custom_type,
         ))
     action, new_id = cur.fetchone()
     return action, new_id
+
+
+def find_files(keyword, limit=500):
+    """依統編（完全相符）或分支名稱（部分相符）查檔案分析。"""
+    cur = mdb._get_conn().cursor()
+    cur.execute(
+        f"SELECT TOP ({int(limit)}) BRANCH_NAME, CUSTOM_PATH, STANDARD_PATH, CUSTOM_TYPE, "
+        f"  DESCRIPTION, SA_DOC_PATH, STD_BASELINE, SCANNED_AT "
+        f"FROM {T} WHERE COMPANY_SNO = ? OR BRANCH_NAME LIKE ? "
+        f"ORDER BY BRANCH_NAME, CUSTOM_PATH",
+        (keyword, like_pattern(keyword)))
+    cols = [c[0] for c in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def like_pattern(keyword):
+    """LIKE 部分比對字串；分支名稱常有底線，萬用字元要當一般字元。"""
+    escaped = keyword.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
+    return f"%{escaped}%"

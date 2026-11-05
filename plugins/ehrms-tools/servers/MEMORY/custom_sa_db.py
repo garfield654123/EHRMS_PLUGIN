@@ -7,6 +7,7 @@
 
 連線與記錄者身分沿用 memory_db（同一個 MSSQL 帳號）。
 """
+from custom_db import like_pattern
 import memory_db as mdb
 
 T = "dbo.HRMS_CUSTOM_SA"
@@ -70,3 +71,16 @@ def append_mapped_path(branch_name, doc_path, path_line):
         f"UPDATE {T} SET MAPPED_PATHS=?, MAPPING_STATUS=? WHERE BRANCH_NAME=? AND DOC_PATH=?",
         ("\n".join(lines), new_status, branch_name, doc_path))
     return True
+
+
+def find_docs(keyword, limit=200):
+    """依統編（完全相符）或分支名稱（部分相符）查 SA 文件，已分析的排前面。"""
+    cur = mdb._get_conn().cursor()
+    cur.execute(
+        f"SELECT TOP ({int(limit)}) BRANCH_NAME, DOC_PATH, DOC_TYPE, VERSION_LABEL, "
+        f"  IS_LATEST, ANALYZED, SUMMARY, MAPPING_STATUS "
+        f"FROM {T} WHERE TAX_ID = ? OR BRANCH_NAME LIKE ? "
+        f"ORDER BY BRANCH_NAME, ANALYZED DESC, DOC_PATH",
+        (keyword, like_pattern(keyword)))
+    cols = [c[0] for c in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]

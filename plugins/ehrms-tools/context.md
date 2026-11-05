@@ -16,6 +16,7 @@
 | 回報的錯誤是不是已知版更問題（更新程式、修正版號、適用客戶） | 版更公告（整批列出） | `version_bulletins` |
 | 客戶需求怎麼處理：前置確認、操作路徑或該套哪個 Task、要請客戶補什麼 | SOP | `sop_lookup` |
 | 修改客戶資料的 SQL 範本 | Task 罐頭語法 | `task_lookup` |
+| 這家客戶有沒有客製、客製了哪些程式與規格書 | 客製紀錄（查無分支不等於確定是標準版） | `custom_lookup` |
 | 資料表、欄位、關聯 | 資料字典 | DB MCP `search_tables`、`get_table_columns` |
 | Jira 單內容 | Jira | Jira MCP `get_issue` |
 

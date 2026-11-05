@@ -2,6 +2,14 @@
 
 EHRMS 開發工具包，整合 **JIRA MCP**、**DB MCP**、**ehrms-memory 團隊共用記憶** 及 **MCP 設定管理 Skill**。
 
+## 未發版：客製查詢 custom_lookup
+
+| 新增 | 說明 |
+|---|---|
+| `custom_lookup` | 查客戶有沒有客製、客製了哪些程式與規格書摘要。來源為 CUSTOM_GIT 分支、HRMS_CUSTOM、HRMS_CUSTOM_SA；只讀不寫，讀 git 不切分支。CUSTOM_GIT 不在預設路徑時設定環境變數 `CUSTOM_GIT_DIR` |
+
+`custom-locate` 與 `crisis-triage` 已改為先用這個工具。
+
 ## v3.11.0：FAQ／Task／SOP 的 AI 寫入口、AI 寫入者標記
 
 | 新增／調整 | 說明 |

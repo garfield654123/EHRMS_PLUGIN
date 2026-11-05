@@ -8,6 +8,8 @@
    version_bulletins：整批列出版更公告（不做相似度篩選），比對已知版更問題用
    faq_log / task_log / sop_log：AI 寫入口，寫入者記為「使用者(AI)」，不可改人工資料
 ④ wiki_lookup：系統原則與大規則（HRMS_WIKI，由 eHRMS-Wiki 發佈，純查詢）
+⑤ custom_lookup：客戶客製查詢（CUSTOM_GIT 分支＋HRMS_CUSTOM＋HRMS_CUSTOM_SA，純查詢）
+   custom_log / custom_sa_log：批次掃描 skill 的寫入口
 伺服器說明（instructions）載入 plugin 根目錄的 context.md，作為常駐的知識庫使用說明。
 """
 import asyncio
@@ -314,6 +316,23 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="custom_lookup",
+            description=(
+                "查客戶有沒有客製、客製了哪些程式與規格書摘要（CUSTOM_GIT 分支、HRMS_CUSTOM、HRMS_CUSTOM_SA，只讀不寫）。"
+                "keyword 給統編最準，也可給公司名稱或英文代號。查無分支不等於確定是標準版，"
+                "回覆會註明哪些來源無法使用。要比對與標準版的邏輯差異，改用 custom-locate skill。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "客戶統編、公司名稱或英文代號"},
+                    "path_keyword": {"type": "string",
+                                     "description": "只列路徑含此關鍵字的檔案，例如類別名或 .asp 檔名（可選）"},
+                },
+                "required": ["keyword"],
+            },
+        ),
+        Tool(
             name="custom_sa_log",
             description=(
                 "寫入/更新一筆 HRMS_CUSTOM_SA（客製分支 SA 規格文件索引，唯一寫入口）。"
@@ -434,6 +453,8 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
             query=arguments.get("query"), page=arguments.get("page"),
             section=arguments.get("section"), customer_code=arguments.get("customer_code"),
             top_k=arguments.get("top_k", 3)))
+    if name == "custom_lookup":
+        return _text(cc.lookup(arguments["keyword"], arguments.get("path_keyword", "")))
     if name == "custom_sa_log":
         return _text(sc.log_doc(
             arguments["tax_id"], arguments["branch_name"], arguments["doc_path"],
