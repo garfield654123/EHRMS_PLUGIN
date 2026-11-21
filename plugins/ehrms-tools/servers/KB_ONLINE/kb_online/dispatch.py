@@ -82,8 +82,9 @@ def find_jira_key(arguments):
 
 
 class Dispatcher:
-    def __init__(self, registry, identity_service, usage_logger, server_version, search_version):
+    def __init__(self, registry, identity_service, usage_logger, server_version, search_version, store=None):
         self.registry = registry
+        self.store = store if store is not None else identity_service.store
         self.identity_service = identity_service
         self.usage = usage_logger
         self.server_version, self.search_version = server_version, search_version

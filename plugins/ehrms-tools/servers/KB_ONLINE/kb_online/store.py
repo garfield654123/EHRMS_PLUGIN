@@ -45,6 +45,12 @@ class SqliteStore:
                 TOOL_NAME TEXT NOT NULL, ARGUMENTS TEXT, QUERY_TEXT TEXT, JIRA_KEY TEXT,
                 RESULT_REFS TEXT, RESULT_COUNT INTEGER, NO_RESULT INTEGER, WRITE_OUTCOME TEXT, WRITE_REF TEXT,
                 ELAPSED_MS INTEGER, ERROR_MSG TEXT, SERVER_VERSION TEXT NOT NULL, SEARCH_VERSION TEXT);
+            CREATE TABLE IF NOT EXISTS HRMS_KB_FLAG (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT, TARGET_TYPE TEXT NOT NULL, TARGET_ID TEXT NOT NULL,
+                REASON TEXT NOT NULL, EVIDENCE TEXT, JIRA_KEY TEXT, FLAG_SOURCE TEXT NOT NULL,
+                CANDIDATE_ID INTEGER, USAGE_LOG_ID INTEGER, CREATED_BY TEXT NOT NULL,
+                CREATED_AT TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                STATUS TEXT NOT NULL DEFAULT 'open', RESOLVED_BY TEXT, RESOLVED_AT TEXT, RESOLVE_NOTE TEXT);
         """)
         self._conn.commit()
 
@@ -67,6 +73,13 @@ class SqliteStore:
         with self._lock:
             self._conn.execute(_USAGE_INSERT.format(table="HRMS_KB_USAGE_LOG"), _usage_values(row))
             self._conn.commit()
+
+    def open_flags(self):
+        """待處理的疑慮標記：[{target_type, target_id, reason}]。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT TARGET_TYPE, TARGET_ID, REASON FROM HRMS_KB_FLAG WHERE STATUS = 'open' ORDER BY ID").fetchall()
+        return [{"target_type": r[0], "target_id": r[1], "reason": r[2]} for r in rows]
 
     def close(self):
         with self._lock:
@@ -126,6 +139,12 @@ class MssqlStore:
         with self._lock:
             self._connect().cursor().execute(
                 _USAGE_INSERT.format(table="dbo.HRMS_KB_USAGE_LOG"), _usage_values(row))
+
+    def open_flags(self):
+        with self._lock:
+            rows = self._connect().cursor().execute(
+                "SELECT TARGET_TYPE, TARGET_ID, REASON FROM dbo.vwHRMS_KB_FLAG_OPEN ORDER BY ID").fetchall()
+        return [{"target_type": r[0], "target_id": r[1], "reason": r[2]} for r in rows]
 
 
 def make_store(settings):

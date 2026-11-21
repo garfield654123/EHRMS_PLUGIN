@@ -70,9 +70,22 @@ servers/KB_ONLINE/
     usage_log.py       使用紀錄與斷線補送
     dispatch.py        工具的單一入口：身分把關 → 執行 → 記錄
     tools_core.py      confirm_identity、kb_info
+    tools_query.py     kb_search、kb_get
     server.py          HTTP 連線層
 tests/test_kb_online.py
 ```
+
+### 查詢工具（`tools_query.py`）
+
+| 工具 | 行為 |
+|---|---|
+| `kb_search(query, sources?, top_k?, jira_key?, customer_code?, version_bulletins?)` | 一次查 Wiki、團隊記憶、FAQ、SOP、Task、Jira 結案紀錄、公告；每個來源各回傳前幾筆（預設 3），分區顯示、不硬排成一條。回傳摘要與編號（如 `[faq#48]`），不含全文與 SQL。`version_bulletins=true` 另外整批列出版更公告。某個來源查詢失敗時會明講，不當成查無資料 |
+| `kb_get(type, id, section?, customer_code?)` | 讀單筆全文。Wiki 可指定規則編號、章節名、上半／下半／全文；Jira 可用紀錄編號或單號；`type=custom` 查某客戶的客製（取代 `custom_lookup`） |
+
+- 評分與資料讀取沿用 `servers/MEMORY` 的程式，沒有修改那邊的任何檔案；本機 plugin 的 9 個查詢工具不受影響。
+- **不回寫 `HIT_COUNT`**：本機 `recall` 每次命中會把引用次數加一，線上版不做，引用次數改由使用紀錄計算。
+- 待處理的疑慮標記會顯示在搜尋結果與全文上（標記的寫入在步驟 4）。
+- 檢索品質與本機版相同（關鍵字與字詞比對），這一步沒有改善檢索本身；之後用 `shadow_set.db` 量測。
 
 所有工具都經過 `Dispatcher.call()`，身分檢查與使用紀錄只寫在這一處。新增工具用 `@registry.tool(...)` 註冊，回傳 `ToolResult`（含回傳的知識編號、寫入結果等），紀錄會自動產生。
 
@@ -102,7 +115,7 @@ py -3 servers/KB_ONLINE/run_server.py
 |---|---|---|
 | 1 | 建表語法 | 已寫好，待 DBA 執行 |
 | 2 | 骨架：HTTP 伺服器、身分確認、使用紀錄與斷線補送 | 完成（2026-11-20），有單元測試與實際連線測試 |
-| 3 | 「搜尋」「取全文」兩個查詢工具 | 未開始 |
+| 3 | 「搜尋」「取全文」兩個查詢工具（`kb_search`、`kb_get`） | 完成（2026-11-21），有單元測試，並對真實知識庫資料庫做過唯讀連線測試 |
 | 4 | `remember`（用途標記、衝突存候選並自動加疑慮標記）與疑慮標記工具 | 未開始 |
 | 5 | 「列出 skill／取得 skill」與常駐說明 | 未開始 |
 | 6 | 部署到主機，先給少數同事試用 | 未開始，等主機 |
@@ -130,3 +143,4 @@ py -3 servers/KB_ONLINE/run_server.py
 | 日期 | 內容 |
 |---|---|
 | 2026-11-20 | 初版：11 項討論定案；完成骨架 |
+| 2026-11-21 | 完成查詢工具 `kb_search`、`kb_get`；線上版不回寫 `HIT_COUNT`；客製查詢併入 `kb_get(type=custom)` |

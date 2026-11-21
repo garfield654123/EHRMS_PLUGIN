@@ -29,14 +29,22 @@ from .dispatch import CallContext, Dispatcher
 from .identity import IdentityService, JiraDirectory
 from .store import make_store
 from .tools_core import registry
+from . import tools_query  # noqa: F401  匯入即註冊 kb_search、kb_get
 from .usage_log import UsageLogger
 
 logger = logging.getLogger("kb_online")
 
 INSTRUCTIONS = """\
-EHRMS 線上知識庫。使用前須確認使用者身分：工具回覆「尚未確認使用者身分」時，先詢問使用者的公司信箱
-（不可猜測或代填），再呼叫 confirm_identity。確認一次後同一台電腦不用再確認。
-每次工具呼叫都會留下使用紀錄（使用者、查詢內容、回傳的知識編號）。
+EHRMS 線上知識庫。
+
+身分：工具回覆「尚未確認使用者身分」時，先詢問使用者的公司信箱（不可猜測或代填），再呼叫 confirm_identity。
+確認一次後同一台電腦不用再確認。每次工具呼叫都會留下使用紀錄（使用者、查詢內容、回傳的知識編號）。
+
+查詢：先用 kb_search 一次查全部來源，再用 kb_get 讀要引用的那幾筆全文；不要只憑摘要下結論。
+處理 Jira 單時把單號帶進 kb_search。回報的是錯誤或異常時，加 version_bulletins=true 比對已知版更問題。
+來源互相矛盾時的優先順序：有程式碼證據的記憶 ＞ Wiki ＞ 人工 FAQ／公告／SOP／Task ＞ AI 撰寫的 FAQ／SOP／Task
+＞ Jira 結案紀錄（僅供參考）。標示「有疑慮」的知識引用前要另外查證。
+公司資料庫沒有客戶資料；Task 的 SQL 只是範本，須人工確認，不可自動執行。
 """
 
 
