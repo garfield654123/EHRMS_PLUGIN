@@ -219,6 +219,19 @@ END
 GO
 
 ------------------------------------------------------------------
+-- 補丁（2026-11-21）：IDENTITY_SOURCE 多一個值 none（尚未確認身分、被擋下的呼叫）
+-- 2026-11-20 建立的表沒有這個值，被擋下的呼叫會寫不進使用紀錄；新建的表不受影響，重複執行也安全
+------------------------------------------------------------------
+IF EXISTS (SELECT 1 FROM sys.check_constraints
+           WHERE name = N'CK_HRMSKBLOG_IDSRC' AND definition NOT LIKE N'%none%')
+BEGIN
+    ALTER TABLE dbo.HRMS_KB_USAGE_LOG DROP CONSTRAINT CK_HRMSKBLOG_IDSRC;
+    ALTER TABLE dbo.HRMS_KB_USAGE_LOG ADD CONSTRAINT CK_HRMSKBLOG_IDSRC
+        CHECK (IDENTITY_SOURCE IN ('jira_list','sso','service','none'));
+END
+GO
+
+------------------------------------------------------------------
 -- 權限（★ 執行前把帳號換成實際的 database user）
 --
 -- 目前決定先沿用現有帳號，所以下面先全部註解。

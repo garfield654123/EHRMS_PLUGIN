@@ -45,7 +45,7 @@
 
 ## 4. 資料表
 
-建表語法：`hrms_kb_online.sql`（尚未在資料庫上執行過）。不修改任何既有資料表。
+建表語法：`hrms_kb_online.sql`。資料表已建立（見第 6 節步驟 1），但伺服器還沒有對它們寫入過；不修改任何既有資料表。
 
 | 表 | 用途 |
 |---|---|
@@ -161,7 +161,7 @@ py -3 servers/KB_ONLINE/run_server.py
 
 | 步驟 | 內容 | 狀態 |
 |---|---|---|
-| 1 | 建表語法 | 已寫好，待 DBA 執行 |
+| 1 | 建表語法 | 四張表與一個 View 已於 2026-11-20 18:28 建立在 EHRMS-LAB-DB／EHRDB_MULTI_IE。**切換到資料庫前還要執行 `hrms_kb_online.sql` 的補丁段落**：當時建立的 `CK_HRMSKBLOG_IDSRC` 沒有 `none` 這個值，被擋下的呼叫會寫不進使用紀錄 |
 | 2 | 骨架：HTTP 伺服器、身分確認、使用紀錄與斷線補送 | 完成（2026-11-20），有單元測試與實際連線測試 |
 | 3 | 「搜尋」「取全文」兩個查詢工具（`kb_search`、`kb_get`） | 完成（2026-11-21），有單元測試，並對真實知識庫資料庫做過唯讀連線測試 |
 | 4 | `remember`（用途標記、衝突存候選並自動加疑慮標記）與疑慮標記工具 `kb_flag` | 完成（2026-11-21），有單元測試與連線測試；連線測試時 HRMS_MEMORY 的寫入以替身取代，沒有寫進真實資料表 |
@@ -195,5 +195,6 @@ py -3 servers/KB_ONLINE/run_server.py
 |---|---|
 | 2026-11-20 | 初版：11 項討論定案；完成骨架 |
 | 2026-11-21 | 完成查詢工具 `kb_search`、`kb_get`；線上版不回寫 `HIT_COUNT`；客製查詢併入 `kb_get(type=custom)` |
+| 2026-11-21 | 在子平電腦試用部署（連接埠 8780）並接到 Claude Code；發現資料表已建立，建表語法補上 `IDENTITY_SOURCE` 的 `none` 補丁；FAQ_web 知識庫架構頁加入線上知識庫 |
 | 2026-11-21 | 完成 `skill_list`、`skill_get` 與常駐說明；線上 skill 由 `online_skills.json` 指定，取得時自動加上工具對照表 |
 | 2026-11-21 | 完成寫入工具 `remember`、`kb_flag`；重複判斷改成只比內容，其餘相似的存成候選；`memory_db.insert_memory` 加選填參數 `created_by` |
