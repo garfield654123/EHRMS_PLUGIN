@@ -142,7 +142,8 @@ py -3 servers/KB_ONLINE/run_server.py
 接到 Claude Code：`claude mcp add --transport http ehrms-kb http://<主機>:8780/mcp`（加完要開新對話才會載入）。
 
 **目前的部署（2026-11-21）**：先跑在子平的電腦上試用，連接埠 8780（8765 被其他程式佔用），只接受本機連線，
-資料存放用 sqlite（`~/.ehrms-tools/kb-online/`），已加到 `C:\D\FAQ_web` 專案的 Claude Code。沒有設定開機自動啟動，
+資料存放用資料庫（`KB_STORE=mssql`，啟動腳本的預設值；紀錄檔與斷線時的暫存檔在 `~/.ehrms-tools/kb-online/`），
+已加到 `C:\D\FAQ_web` 專案的 Claude Code。沒有設定開機自動啟動，
 重開機後要再執行一次啟動腳本。正式主機到位後再搬過去。
 
 | 環境變數 | 預設 | 說明 |
@@ -161,7 +162,7 @@ py -3 servers/KB_ONLINE/run_server.py
 
 | 步驟 | 內容 | 狀態 |
 |---|---|---|
-| 1 | 建表語法 | 四張表與一個 View 已於 2026-11-20 18:28 建立在 EHRMS-LAB-DB／EHRDB_MULTI_IE。**切換到資料庫前還要執行 `hrms_kb_online.sql` 的補丁段落**：當時建立的 `CK_HRMSKBLOG_IDSRC` 沒有 `none` 這個值，被擋下的呼叫會寫不進使用紀錄 |
+| 1 | 建表語法 | 完成。四張表與一個 View 於 2026-11-20 18:28 建立在 EHRMS-LAB-DB／EHRDB_MULTI_IE；2026-11-21 執行補丁，`CK_HRMSKBLOG_IDSRC` 加上 `none`。伺服器已切換成寫入資料庫（`KB_STORE=mssql`） |
 | 2 | 骨架：HTTP 伺服器、身分確認、使用紀錄與斷線補送 | 完成（2026-11-20），有單元測試與實際連線測試 |
 | 3 | 「搜尋」「取全文」兩個查詢工具（`kb_search`、`kb_get`） | 完成（2026-11-21），有單元測試，並對真實知識庫資料庫做過唯讀連線測試 |
 | 4 | `remember`（用途標記、衝突存候選並自動加疑慮標記）與疑慮標記工具 `kb_flag` | 完成（2026-11-21），有單元測試與連線測試；連線測試時 HRMS_MEMORY 的寫入以替身取代，沒有寫進真實資料表 |
@@ -174,7 +175,7 @@ py -3 servers/KB_ONLINE/run_server.py
 - **信箱是使用者自己說的**：伺服器只能確認「Jira 名單上有這個人」，不能確認是本人。接上公司帳號登入才會解決。
 - **以電腦位址認人**：多人共用同一個對外位址（例如經 VPN）會被當成同一個人。目前前提是同事都在內網。
 - **Jira 名單比對尚未對真正的 Jira 測試過**：單元測試用的是假名單。Jira 若因隱私設定不回傳信箱，程式只在搜尋結果剛好一位時接受。
-- **MssqlStore 尚未執行過**：資料表還沒建立，目前只測過 sqlite（使用紀錄、使用者對應、候選、疑慮標記都是）。
+- **資料庫寫入的驗證程度不同**（2026-11-21）：使用紀錄已經由實際呼叫寫進 `HRMS_KB_USAGE_LOG`（含被擋下的呼叫）；使用者對應、候選、疑慮標記只在交易內執行寫入語法後復原，確認語法與欄位正確，還沒有真正留下過資料。
 - **`remember` 還沒有真的寫進過 HRMS_MEMORY**：測試都用替身攔下寫入。第一次對真實資料表寫入時要確認記錄者與 `META` 內容正確。
 - **重複與候選的門檻未校準**，也沒有擋客戶資料（見寫入工具一節）。
 - **來源（ORIGIN）目前一律是真人對話**：排程與網站接上時要加上辨識方式。
@@ -195,6 +196,7 @@ py -3 servers/KB_ONLINE/run_server.py
 |---|---|
 | 2026-11-20 | 初版：11 項討論定案；完成骨架 |
 | 2026-11-21 | 完成查詢工具 `kb_search`、`kb_get`；線上版不回寫 `HIT_COUNT`；客製查詢併入 `kb_get(type=custom)` |
+| 2026-11-21 | 執行 `IDENTITY_SOURCE` 補丁；伺服器切換成寫入資料庫，啟動腳本預設改為 `mssql`。使用紀錄表的第 1、2 筆是切換後的驗證呼叫（使用者 unknown、用戶端 `mcp 0.1.0`） |
 | 2026-11-21 | 在子平電腦試用部署（連接埠 8780）並接到 Claude Code；發現資料表已建立，建表語法補上 `IDENTITY_SOURCE` 的 `none` 補丁；FAQ_web 知識庫架構頁加入線上知識庫 |
 | 2026-11-21 | 完成 `skill_list`、`skill_get` 與常駐說明；線上 skill 由 `online_skills.json` 指定，取得時自動加上工具對照表 |
 | 2026-11-21 | 完成寫入工具 `remember`、`kb_flag`；重複判斷改成只比內容，其餘相似的存成候選；`memory_db.insert_memory` 加選填參數 `created_by` |

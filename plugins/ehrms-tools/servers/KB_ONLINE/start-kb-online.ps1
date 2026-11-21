@@ -1,13 +1,14 @@
 ﻿# 在背景啟動 EHRMS 線上知識庫 MCP，並確認它有回應。已經在跑就不重複啟動。
 #   .\start-kb-online.ps1                 預設連接埠 8780，只接受本機連線
 #   .\start-kb-online.ps1 -Stop           停止
+#   .\start-kb-online.ps1 -Store sqlite   資料表不可用時，改把使用紀錄等資料存在本機檔案
 #   .\start-kb-online.ps1 -BindHost 0.0.0.0 -AllowedHosts "主機名稱:8780"    開放給內網其他電腦
 # 連線設定（MSSQL_*、JIRA_*）讀取順序見 kb_online/config.py。紀錄檔在 $DataDir\server.log。
 param(
     [int]$Port = 8780,
     [string]$BindHost = "127.0.0.1",
     [string]$AllowedHosts = "",
-    [ValidateSet("sqlite", "mssql")][string]$Store = "sqlite",
+    [ValidateSet("sqlite", "mssql")][string]$Store = "mssql",
     [string]$DataDir = (Join-Path $env:USERPROFILE ".ehrms-tools\kb-online"),
     [switch]$Stop
 )
