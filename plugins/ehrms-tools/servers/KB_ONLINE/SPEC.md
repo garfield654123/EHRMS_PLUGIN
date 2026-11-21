@@ -22,7 +22,7 @@
 | 5 | 資料庫帳號 | 先沿用現有帳號。之後請 DBA 另開「知識庫專用」與「清理用」帳號（授權語法在 `hrms_kb_online.sql` 最下面） |
 | 6 | 使用紀錄 | 一次工具呼叫一筆，只新增不修改。欄位見第 4 節 |
 | 7 | 單號關聯 | 對話中有提到 Jira 單才關聯，沒提到留空 |
-| 8 | 寫入 | 線上版寫入工具只有 `remember`。Jira 結案紀錄由既有排程（jira-auto-log）負責；FAQ／SOP／Task 不由線上版寫入，之後由清理 agent 判斷是否升級 |
+| 8 | 寫入 | 團隊記憶用 `remember`；FAQ／SOP／Task／公告用 `kb_contribute`（2026-11-21 改，見決策 16；原本是「線上版只寫團隊記憶」）。Jira 結案紀錄由既有排程（jira-auto-log）負責，線上版不寫 |
 | 9 | 取代與衝突 | 線上版不提供取代（supersedes）與強制寫入（force），取代只由人或其他 agent 執行。`remember` 撞到「高度相似但結論不同」時：新內容完整存成候選（不進正式記憶、不會被查到），自動幫舊記憶加上疑慮標記並指向候選，回覆 AI「已記錄為待確認」 |
 | 10 | 疑慮標記 | 新增工具：AI 發現某筆知識可能有錯時標記（哪一筆、理由、依據）。只新增不修改；記憶與 Wiki 都能標。查詢結果要顯示有疑慮與理由。只有人或清理 agent 能解除 |
 | 11 | 用途標記 | `remember` 加用途標記：可回覆客戶／處理步驟／資料修正語法／一般知識。存在 `HRMS_MEMORY.META`。修資料的 SQL 也寫進記憶即可（標記為資料修正語法時沿用 `task_log` 的 SQL 檢查並加註「僅供參考」——這點是實作時的理解，子平尚未明確確認） |
@@ -30,6 +30,8 @@
 | 13 | Jira MCP | 先獨立一個，暫用子平的帳號，留言功能保留。等大家確定使用後改成各自的 token 與使用者名稱 |
 | 14 | FAQ_web | 資料本來就與其他來源連動，不另外處理。AI 助理的對話紀錄之後接上記憶儲存 |
 | 15 | RAG | 之後加入，接在「搜尋」後面，工具介面不變。關鍵字與語意一起用。embedding 傾向用開源模型、放內部主機（Claude 不提供 embedding 模型）。回答用的 LLM 暫定 Claude API key 或 Claude CLI，之後可能轉內部 LLM。伺服器只負責找資料，不負責回答 |
+
+| 16 | 從對話窗填寫知識 | 顧問多半用 Claude Code 而不是 FAQ_web，所以要保留從對話窗新增或更新 FAQ／SOP／Task／公告的入口（`kb_contribute`）。**寫入就立刻生效，不設審核關卡**（審核者只有子平一人，設關卡會卡住；版更公告又有時效性）。改用三件事把關：① 記錄填寫人，有問題直接問填寫人；② 權重較低，標示「未審核」並排在人工整理的內容之後；③ 任何人有意見用 `kb_flag` 提出疑慮，之後由人或清理 agent 審核。更新既有內容時**不覆蓋**：新增一筆更新版，舊的保留並自動標示「已有更新版本」 |
 
 ## 3. 清理 agent 要回答的問題
 
@@ -72,6 +74,7 @@ servers/KB_ONLINE/
     tools_core.py      confirm_identity、kb_info
     tools_query.py     kb_search、kb_get
     tools_write.py     remember、kb_flag
+    tools_contribute.py  kb_contribute
     tools_skill.py     skill_list、skill_get、常駐說明的 skill 索引
   online_skills.json   線上版提供哪些 skill
     server.py          HTTP 連線層
@@ -110,6 +113,25 @@ tests/test_kb_online.py
 - 用途為 `data_fix` 時，內容裡 ```` ```sql ```` 區塊會用 `task_log` 的同一套檢查；讀取時固定加註「僅供參考」。
 - **沒有檢查內容是否含客戶資料**，目前只靠工具說明要求 AI 不要寫。
 - 為了讓記錄者是伺服器確認的使用者，`servers/MEMORY/memory_db.py` 的 `insert_memory` 多了一個選填參數 `created_by`；不給時行為與原本相同。這是線上版對 MEMORY 目錄唯一的修改。
+
+### 填寫工具（`tools_contribute.py`）
+
+`kb_contribute(type, title, content, module?, category?, syntax?, notes?, keywords?, description?, updates?, reason?, basis?, jira_key?)`
+
+| 類型 | 寫入的表 | 檢查 |
+|---|---|---|
+| `faq` | HRMS_FAQ | 模組須為既有值 |
+| `sop` | HRMS_FAQ_SOP | 模組須為既有值；內文須依 SOP 模板 |
+| `task` | HRMS_TASK | 模組、分類須為既有值；SQL 用 `task_log` 的同一套檢查 |
+| `bulletin` | HRMS_FAQ_BULLETIN | 公告類型須為既有值（版更公告用「版本更新」等） |
+
+- 寫入者記為「使用者(AI)」，內文尾端加註「線上填寫；填寫人：某某」與依據。
+- **新增**：同一張表有高度相似的內容時不新增，並告知可以帶 `updates` 改成更新那一筆，所以不會卡住。
+- **更新**（帶 `updates`）：新增一筆更新版（內文註明「更新自 faq#48」），舊的不動，並在舊的那筆加上疑慮標記「已有更新版本 faq#新編號（填寫人 某某）」。
+- 查詢時：經工具寫入的資料顯示「填寫人 某某・未審核」，排序分數乘以 0.9；整批列出版更公告時會另外列出哪幾則是線上填寫的。
+- 內容必須來自使用者提供的資料，這點只靠工具說明要求，伺服器無法驗證。
+- 與本機 `faq_log`／`sop_log`／`task_log` 的差別：不要求依據必填、Task 不要求先有 Jira 結案紀錄、可以更新人工整理的內容（以新增更新版的方式）、多了公告。
+- 為了顯示公告的填寫人，`servers/MEMORY/refdata_db.py` 讀公告時多讀了寫入者欄位。
 
 ### skill 與常駐說明（`tools_skill.py`、`online_skills.json`）
 
@@ -196,6 +218,7 @@ py -3 servers/KB_ONLINE/run_server.py
 |---|---|
 | 2026-11-20 | 初版：11 項討論定案；完成骨架 |
 | 2026-11-21 | 完成查詢工具 `kb_search`、`kb_get`；線上版不回寫 `HIT_COUNT`；客製查詢併入 `kb_get(type=custom)` |
+| 2026-11-21 | 新增 `kb_contribute`（決策 16）：從對話窗新增或更新 FAQ／SOP／Task／公告，立刻生效、記錄填寫人、權重較低、不覆蓋舊內容。決策 8 隨之修改 |
 | 2026-11-21 | 執行 `IDENTITY_SOURCE` 補丁；伺服器切換成寫入資料庫，啟動腳本預設改為 `mssql`。使用紀錄表的第 1、2 筆是切換後的驗證呼叫（使用者 unknown、用戶端 `mcp 0.1.0`） |
 | 2026-11-21 | 在子平電腦試用部署（連接埠 8780）並接到 Claude Code；發現資料表已建立，建表語法補上 `IDENTITY_SOURCE` 的 `none` 補丁；FAQ_web 知識庫架構頁加入線上知識庫 |
 | 2026-11-21 | 完成 `skill_list`、`skill_get` 與常駐說明；線上 skill 由 `online_skills.json` 指定，取得時自動加上工具對照表 |

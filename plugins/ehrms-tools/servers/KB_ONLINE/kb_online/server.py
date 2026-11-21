@@ -32,6 +32,7 @@ from .tools_core import registry
 from . import tools_query  # noqa: F401  匯入即註冊 kb_search、kb_get
 from . import tools_write  # noqa: F401  匯入即註冊 remember、kb_flag
 from . import tools_skill  # 匯入即註冊 skill_list、skill_get
+from . import tools_contribute  # noqa: F401  匯入即註冊 kb_contribute
 from .usage_log import UsageLogger
 
 logger = logging.getLogger("kb_online")
@@ -54,12 +55,15 @@ Jira 結案紀錄、公告。每次工具呼叫都會留下使用紀錄（使用
     再看記憶與 Jira 結案紀錄；資訊不足時用 SOP 列出要請客戶補的資料。
 - 來源互相矛盾時的優先順序：有程式碼證據的記憶 ＞ Wiki ＞ 人工 FAQ／公告／SOP／Task ＞ AI 撰寫的 FAQ／SOP／Task
   ＞ Jira 結案紀錄（僅供參考）。標示「有疑慮」的知識，引用前要另外查證。
+- 標示「填寫人 某某・未審核」的是經工具寫入的內容，權重較低；引用時說明出處，內容有疑問請使用者直接詢問填寫人。
 - 查不到就說查不到，不要補上知識庫沒有的內容。
 
 ## 寫回（每次處理完都要判斷）
 結論確認後、回覆使用者之前，判斷這次有沒有「已確認、而且跨案件可通用」的新知識：
 - 有 → 先用 kb_search 確認沒有相同內容，再用 remember 寫入；有對應的 Jira 單要填 ref_key。
 - 發現既有知識可能有錯 → 用 kb_flag 提出疑慮並附依據。線上版不能取代或修改既有知識。
+- 使用者明確要新增或更新一則 FAQ／SOP／Task／公告 → 用 kb_contribute，內容要來自使用者提供的資料。
+  更新既有內容時帶 updates：會新增一筆更新版，舊的保留並標示已有更新版本。
 - 沒有 → 在回覆最後用一句話說明為什麼這次沒有寫入（例如：已有相同記憶、結論尚未確認、只是個案資料調整）。
 只寫已確認的結論，不寫推測，也不寫客戶的實際資料（公司、員工、帳號）。寫入或標記後，在回覆中列出編號。
 

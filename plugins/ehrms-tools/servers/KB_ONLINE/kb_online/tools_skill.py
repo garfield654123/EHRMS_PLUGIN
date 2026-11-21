@@ -33,7 +33,8 @@ TOOL_MAP = """\
 > | `version_bulletins` | `kb_search` 加 `version_bulletins=true` |
 > | `wiki_lookup`（給 page／section）、讀某一筆的全文 | `kb_get` |
 > | `custom_lookup` | `kb_get(type="custom", id=統編或公司名稱)` |
-> | `jira_log`、`faq_log`、`sop_log`、`task_log` | 線上版不提供。已確認且可通用的結論用 `remember` 寫入並選對 `purpose`；Jira 結案紀錄由排程另外整理 |
+> | `faq_log`、`sop_log`、`task_log` | 使用者明確要新增或更新 FAQ／SOP／Task／公告時用 `kb_contribute`；其餘已確認且可通用的結論用 `remember` 寫入並選對 `purpose` |
+> | `jira_log` | 線上版不提供，Jira 結案紀錄由排程另外整理 |
 > | `remember` 的 `supersedes`、`force` | 線上版沒有。發現既有知識有錯，用 `kb_flag` 提出疑慮並附依據 |
 > | Jira 工具（`get_issue` 等）、DB MCP、`ehrms-custom-mcp` | 不在這個服務裡。你另外有接上才能用；沒有的話請使用者提供需要的內容 |
 > | 讀程式碼（Read／Grep 追碼）、其他 skill（`custom-locate`、`debug` 等） | 沒有程式碼可讀時略過該步驟，並在回覆中說明哪些地方需要工程師確認 |

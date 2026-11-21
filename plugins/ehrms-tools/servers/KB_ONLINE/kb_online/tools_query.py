@@ -46,8 +46,16 @@ def _brief(text, limit=BRIEF):
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+AI_WEIGHT = 0.9      # 經工具寫入、未審核的資料，排序時分數打折，排在相近的人工資料之後
+
+
+def _is_ai(author):
+    return (author or "").endswith("(AI)")
+
+
 def _ai_tag(author):
-    return " 🤖AI撰寫" if (author or "").endswith("(AI)") else ""
+    """經工具寫入的資料：顯示填寫人並標示未審核，有問題可以直接去問填寫人。"""
+    return f" 👤填寫人 {author[:-4]}・未審核" if _is_ai(author) else ""
 
 
 PURPOSE_LABELS = {"reply": "可回覆客戶", "procedure": "處理步驟", "data_fix": "資料修正語法", "general": "一般知識"}
@@ -101,7 +109,7 @@ def _rank_refdata(key):
             sc = mc._score(query, qs, {"topic": r.get(conf["topic_field"], "") or "", "content": content,
                                        "keywords": r.get("keywords", ""), "review": ""})
             if sc >= THRESHOLD:
-                scored.append((sc, r, content))
+                scored.append((sc * AI_WEIGHT if _is_ai(r.get("author")) else sc, r, content))
         scored.sort(key=lambda x: -x[0])
         out = []
         for sc, r, content in scored[:top_k]:
@@ -186,10 +194,16 @@ def _search_sync(store, query, sources, top_k, customer_code, with_version):
     if with_version:
         try:
             lines.append("\n" + rc.version_bulletins())
+            filled = []
             for r in refdata_db.load_all("bulletin"):
-                if (r.get("category") or "").strip() in rc.VERSION_TYPES \
-                        and not any(x["type"] == "bulletin" and x["id"] == r["id"] for x in refs):
+                if (r.get("category") or "").strip() not in rc.VERSION_TYPES:
+                    continue
+                if _is_ai(r.get("author")):
+                    filled.append(f"公告 #{r['id']}（填寫人 {r['author'][:-4]}）")
+                if not any(x["type"] == "bulletin" and x["id"] == r["id"] for x in refs):
                     refs.append({"type": "bulletin", "id": r["id"], "score": None})
+            if filled:
+                lines.append(f"\n其中線上填寫、未審核的：{'、'.join(filled)}。內容有疑問可以直接問填寫人。")
         except Exception as e:
             failed.append(f"版更公告（{type(e).__name__}）")
 
@@ -290,6 +304,8 @@ def _get_refdata(key):
         if not r:
             return None, None
         lines = [f"# {rc.LABELS[key]} #{r['id']}"] + rc._fmt(key, r)
+        if _is_ai(r.get("author")):
+            lines.append(f"\n👤 填寫人：{r['author'][:-4]}（線上填寫、未審核；內容有疑問可以直接問填寫人）")
         if key == "task":
             lines.append(f"\n{rc.TASK_DISCLAIMER}")
         return "\n".join(lines), r["id"]

@@ -30,9 +30,9 @@ TABLES = {
     },
     "bulletin": {
         "sql": ("SELECT ID, TITLE, CONTENT, ISNULL(TYPE, N'') AS CATEGORY, N'' AS KEYWORDS, "
-                "CONVERT(VARCHAR(10), CREATE_DATE, 120) AS CREATED "
+                "CONVERT(VARCHAR(10), CREATE_DATE, 120) AS CREATED, ISNULL(AUTHOR, N'') AS AUTHOR "
                 "FROM dbo.HRMS_FAQ_BULLETIN WHERE IS_DELETE = 0 AND SHOW = 1"),
-        "columns": ["ID", "TITLE", "CONTENT", "CATEGORY", "KEYWORDS", "CREATED"],
+        "columns": ["ID", "TITLE", "CONTENT", "CATEGORY", "KEYWORDS", "CREATED", "AUTHOR"],
     },
     "task": {
         "sql": ("SELECT task_id AS ID, task_name AS TASK_NAME, "
