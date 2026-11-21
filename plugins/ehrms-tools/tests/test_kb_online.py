@@ -190,6 +190,31 @@ class DispatchTests(Base):
         self.assertIsNone(find_jira_key({"query": "特休 SLC01 設定", "top_k": 3}))
 
 
+class ConfigTests(unittest.TestCase):
+    def test_env_sources_priority(self):
+        from kb_online import config
+        keep = {k: os.environ.get(k) for k in config.CONNECTION_KEYS + ("KB_PORT", "KB_ENV_FILE")}
+        self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                                 for k, v in keep.items()])
+        for k in keep:
+            os.environ.pop(k, None)
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, ".ehrms-tools"))
+            os.makedirs(os.path.join(home, ".claude"))
+            with open(os.path.join(home, ".ehrms-tools", ".env"), "w", encoding="utf-8") as f:
+                f.write("KB_PORT=9001\nMSSQL_SERVER=from-env-file\n")
+            with open(os.path.join(home, ".claude", "settings.json"), "w", encoding="utf-8") as f:
+                json.dump({"env": {"MSSQL_SERVER": "from-settings", "MSSQL_DATABASE": "db", "KB_PORT": "9999",
+                                   "OTHER_SECRET": "x"}}, f)
+            os.environ["MSSQL_DATABASE"] = "already-set"
+            config.load_env_file(home=home)
+        self.assertEqual(os.environ["KB_PORT"], "9001")                 # 設定檔的值
+        self.assertEqual(os.environ["MSSQL_SERVER"], "from-env-file")   # 設定檔優先於 settings.json
+        self.assertEqual(os.environ["MSSQL_DATABASE"], "already-set")   # 已在環境裡的不覆蓋
+        self.assertNotIn("OTHER_SECRET", os.environ)                    # settings.json 只補連線設定
+        os.environ.pop("OTHER_SECRET", None)
+
+
 class UsageLogTests(Base):
     async def test_spool_when_db_down_then_flush_in_order(self):
         broken = BrokenStore()

@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """線上知識庫 MCP 的設定：全部從環境變數讀，啟動時讀一次。
 
-環境變數可以放在 KB_ENV_FILE 指到的檔案，或 ~/.ehrms-tools/.env（與本機 plugin 共用）。
+環境變數的來源，前面的優先：
+1. 啟動時已經在環境裡的值
+2. KB_ENV_FILE 指到的檔案；沒指定時讀 ~/.ehrms-tools/.env（與本機 plugin 共用）
+3. ~/.claude/settings.json 的 env：只補資料庫與 Jira 連線設定（本機 plugin 也是這樣讀），
+   讓已經裝好 plugin 的電腦不用再設定一次
 """
+import json
 import os
 from pathlib import Path
 
@@ -10,18 +15,34 @@ SERVER_VERSION = "0.1.0"
 SEARCH_VERSION = "keyword-1"   # 檢索方式版本；加入 RAG 後要換，使用紀錄才分得出前後
 
 
-def load_env_file():
+CONNECTION_KEYS = ("MSSQL_SERVER", "MSSQL_DATABASE", "MSSQL_USERNAME", "MSSQL_PASSWORD",
+                   "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN")
+
+
+def load_env_file(home=None):
     """已經在環境裡的值優先，檔案只補沒有的。"""
+    home = Path(home) if home is not None else Path.home()
     explicit = os.getenv("KB_ENV_FILE")
-    path = Path(explicit).expanduser() if explicit else Path.home() / ".ehrms-tools" / ".env"
-    if not path.is_file():
-        if explicit:
-            raise ValueError(f"KB_ENV_FILE 指到的檔案不存在：{path}")
+    path = Path(explicit).expanduser() if explicit else home / ".ehrms-tools" / ".env"
+    if path.is_file():
+        from dotenv import dotenv_values
+        for key, value in dotenv_values(path, encoding="utf-8-sig", interpolate=False).items():
+            if value and not os.getenv(key):
+                os.environ[key] = value
+    elif explicit:
+        raise ValueError(f"KB_ENV_FILE 指到的檔案不存在：{path}")
+
+    if all(os.getenv(k) for k in CONNECTION_KEYS):
         return
-    from dotenv import dotenv_values
-    for key, value in dotenv_values(path, encoding="utf-8-sig", interpolate=False).items():
-        if value and not os.getenv(key):
-            os.environ[key] = value
+    try:
+        settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
+        values = settings.get("env", {}) if isinstance(settings, dict) else {}
+    except (OSError, ValueError):
+        return
+    if isinstance(values, dict):
+        for key in CONNECTION_KEYS:
+            if isinstance(values.get(key), str) and values[key].strip() and not os.getenv(key):
+                os.environ[key] = values[key]
 
 
 def _list(name, default=""):

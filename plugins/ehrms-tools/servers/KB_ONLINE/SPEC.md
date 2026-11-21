@@ -132,6 +132,19 @@ py -3 servers/KB_ONLINE/run_server.py
 
 用戶端連線網址：`http://<主機>:<KB_PORT>/mcp`　健康檢查：`GET /health`
 
+背景啟動與停止（Windows）：
+
+```
+.\servers\KB_ONLINE\start-kb-online.ps1          預設連接埠 8780，只接受本機連線
+.\servers\KB_ONLINE\start-kb-online.ps1 -Stop
+```
+
+接到 Claude Code：`claude mcp add --transport http ehrms-kb http://<主機>:8780/mcp`（加完要開新對話才會載入）。
+
+**目前的部署（2026-11-21）**：先跑在子平的電腦上試用，連接埠 8780（8765 被其他程式佔用），只接受本機連線，
+資料存放用 sqlite（`~/.ehrms-tools/kb-online/`），已加到 `C:\D\FAQ_web` 專案的 Claude Code。沒有設定開機自動啟動，
+重開機後要再執行一次啟動腳本。正式主機到位後再搬過去。
+
 | 環境變數 | 預設 | 說明 |
 |---|---|---|
 | `KB_HOST`／`KB_PORT` | `127.0.0.1`／`8765` | 部署到主機時 `KB_HOST` 改成 `0.0.0.0` |
