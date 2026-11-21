@@ -50,6 +50,16 @@ def _ai_tag(author):
     return " 🤖AI撰寫" if (author or "").endswith("(AI)") else ""
 
 
+PURPOSE_LABELS = {"reply": "可回覆客戶", "procedure": "處理步驟", "data_fix": "資料修正語法", "general": "一般知識"}
+DATA_FIX_NOTE = "⚠️ 這筆含修正資料的語法，僅供參考：須人工確認參數與影響範圍後才可執行，AI 不可自動執行。"
+
+
+def _purpose_tag(r):
+    """記憶的用途標記（線上版 remember 寫入時存在 META.purpose）；一般知識與舊資料不顯示。"""
+    purpose = (r.get("meta") or {}).get("purpose")
+    return f"〔{PURPOSE_LABELS[purpose]}〕" if purpose in PURPOSE_LABELS and purpose != "general" else ""
+
+
 # ── 各來源的排序：回傳 [(分數, 編號, 一行摘要)]，由高到低 ─────────────
 
 def _rank_memory(query, qs, top_k, **_):
@@ -63,8 +73,8 @@ def _rank_memory(query, qs, top_k, **_):
         for sc, r in sorted(hits[kind], key=lambda x: -x[0])[:top_k]:
             entry = f" → `{r['entry_path']}`" if kind == "Engineer" and r["entry_path"] else ""
             verified = " ✅已驗證" if r["review"] == "verified" else ""
-            out.append((sc, r["id"], f"【{r['topic']}】{kind}{entry}{verified}{_ai_tag(r['created_by'])}｜"
-                                     f"{_brief(r['content'])}"))
+            out.append((sc, r["id"], f"【{r['topic']}】{kind}{_purpose_tag(r)}{entry}{verified}"
+                                     f"{_ai_tag(r['created_by'])}｜{_brief(r['content'])}"))
     return sorted(out, key=lambda x: -x[0])
 
 
@@ -138,7 +148,11 @@ def _flag_notes(store):
     notes = {}
     try:
         for f in store.open_flags():
-            notes.setdefault((f["target_type"], str(f["target_id"])), []).append(f["reason"])
+            kind, target, reason = f["target_type"], str(f["target_id"]), f["reason"]
+            if kind == "wiki" and "#" in target:      # 標在某條規則上（CARD#R7）：顯示在該頁，並註明是哪一條
+                target, rule = target.split("#", 1)
+                reason = f"{rule}：{reason}"
+            notes.setdefault((kind, target), []).append(reason)
     except Exception:
         pass
     return notes
@@ -236,7 +250,9 @@ def _get_memory(rid, **_):
     r = next((x for x in rows if x["id"] == n), None)
     if not r:
         return None, None
-    lines = [f"# 團隊記憶 #{r['id']}【{r['topic']}】（{r['type']}）"]
+    lines = [f"# 團隊記憶 #{r['id']}【{r['topic']}】（{r['type']}）{_purpose_tag(r)}"]
+    if (r.get("meta") or {}).get("purpose") == "data_fix":
+        lines.append(DATA_FIX_NOTE)
     newer = [x["id"] for x in rows if x["review"] != "rejected"
              and (x["supersedes"] == n or n in [_int(i) for i in x["meta"].get("supersedes_all", [])])]
     if r["review"] == "rejected":
@@ -282,7 +298,11 @@ def _get_refdata(key):
 
 def _get_wiki(rid, section=None, customer_code=None, **_):
     text = wc.lookup(page=str(rid), section=section, customer_code=customer_code)
-    return (None, None) if text.startswith("⚠️ 找不到頁面") else (text, str(rid))
+    if text.startswith("⚠️ 找不到頁面"):
+        return None, None
+    # 編號統一用主題代碼（沒有就用路徑），不管呼叫端給的是標題、路徑或大小寫不同的代碼
+    page = wc._find_page(wc._visible(wiki_db.load_all(), customer_code), str(rid))
+    return text, (page.get("topic_code") or page["git_path"]) if page else str(rid)
 
 
 def _get_custom(rid, section=None, **_):

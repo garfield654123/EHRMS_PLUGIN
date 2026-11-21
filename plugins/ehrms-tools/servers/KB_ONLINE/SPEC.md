@@ -71,6 +71,7 @@ servers/KB_ONLINE/
     dispatch.py        工具的單一入口：身分把關 → 執行 → 記錄
     tools_core.py      confirm_identity、kb_info
     tools_query.py     kb_search、kb_get
+    tools_write.py     remember、kb_flag
     server.py          HTTP 連線層
 tests/test_kb_online.py
 ```
@@ -86,6 +87,27 @@ tests/test_kb_online.py
 - **不回寫 `HIT_COUNT`**：本機 `recall` 每次命中會把引用次數加一，線上版不做，引用次數改由使用紀錄計算。
 - 待處理的疑慮標記會顯示在搜尋結果與全文上（標記的寫入在步驟 4）。
 - 檢索品質與本機版相同（關鍵字與字詞比對），這一步沒有改善檢索本身；之後用 `shadow_set.db` 量測。
+
+### 寫入工具（`tools_write.py`）
+
+| 工具 | 行為 |
+|---|---|
+| `remember(kind, purpose, topic, content, keywords?, func_path?, entry_path?, entry_method?, ref_key?)` | 寫入 HRMS_MEMORY。記錄者是伺服器確認過的使用者（如 `amy.lin(AI)`），`SOURCE=kb-online`，用途存在 `META.purpose`。沒有 `supersedes` 與 `force` 參數，帶了也無效 |
+| `kb_flag(type, id, reason, evidence, jira_key?)` | 對既有知識提出疑慮。會先確認目標存在；理由與依據都必填。Wiki 可標到某條規則（`CARD#R7`）。不修改原內容 |
+
+`remember` 寫入前的判斷（只在同一型別內比）：
+
+| 情況 | 判斷方式 | 結果 |
+|---|---|---|
+| 沒有相似的既有記憶 | 相似度（`memory_core._dup_sim`）低於 0.75 | 新增正式記憶 |
+| 幾乎相同 | 相似度 ≥ 0.75，且**只比內容本身**的字詞重疊 ≥ 0.90（Engineer 還要入口檔名相同） | 不新增，回覆既有編號 |
+| 相似但不是同一個說法 | 相似度 ≥ 0.75 但不符合上一列 | 新內容完整存成候選，並自動幫被撞到的記憶加疑慮標記 |
+
+- 字面比對分不出兩筆的結論是否相反，所以門檻設得保守：寧可多存成候選，不要當成重複丟掉。本機版的做法是 System 型一律當重複，會把相反的結論丟掉，線上版不沿用。
+- 0.75 與 0.90 兩個門檻是依少量例子訂的，**沒有用真實資料校準過**。上線後看使用紀錄裡 `candidate` 與 `duplicate` 的比例再調整。
+- 用途為 `data_fix` 時，內容裡 ```` ```sql ```` 區塊會用 `task_log` 的同一套檢查；讀取時固定加註「僅供參考」。
+- **沒有檢查內容是否含客戶資料**，目前只靠工具說明要求 AI 不要寫。
+- 為了讓記錄者是伺服器確認的使用者，`servers/MEMORY/memory_db.py` 的 `insert_memory` 多了一個選填參數 `created_by`；不給時行為與原本相同。這是線上版對 MEMORY 目錄唯一的修改。
 
 所有工具都經過 `Dispatcher.call()`，身分檢查與使用紀錄只寫在這一處。新增工具用 `@registry.tool(...)` 註冊，回傳 `ToolResult`（含回傳的知識編號、寫入結果等），紀錄會自動產生。
 
@@ -116,7 +138,7 @@ py -3 servers/KB_ONLINE/run_server.py
 | 1 | 建表語法 | 已寫好，待 DBA 執行 |
 | 2 | 骨架：HTTP 伺服器、身分確認、使用紀錄與斷線補送 | 完成（2026-11-20），有單元測試與實際連線測試 |
 | 3 | 「搜尋」「取全文」兩個查詢工具（`kb_search`、`kb_get`） | 完成（2026-11-21），有單元測試，並對真實知識庫資料庫做過唯讀連線測試 |
-| 4 | `remember`（用途標記、衝突存候選並自動加疑慮標記）與疑慮標記工具 | 未開始 |
+| 4 | `remember`（用途標記、衝突存候選並自動加疑慮標記）與疑慮標記工具 `kb_flag` | 完成（2026-11-21），有單元測試與連線測試；連線測試時 HRMS_MEMORY 的寫入以替身取代，沒有寫進真實資料表 |
 | 5 | 「列出 skill／取得 skill」與常駐說明 | 未開始 |
 | 6 | 部署到主機，先給少數同事試用 | 未開始，等主機 |
 | 7 | 之後：Jira MCP 上線、AI 助理對話接記憶、RAG、清理 agent | 未開始 |
@@ -126,7 +148,9 @@ py -3 servers/KB_ONLINE/run_server.py
 - **信箱是使用者自己說的**：伺服器只能確認「Jira 名單上有這個人」，不能確認是本人。接上公司帳號登入才會解決。
 - **以電腦位址認人**：多人共用同一個對外位址（例如經 VPN）會被當成同一個人。目前前提是同事都在內網。
 - **Jira 名單比對尚未對真正的 Jira 測試過**：單元測試用的是假名單。Jira 若因隱私設定不回傳信箱，程式只在搜尋結果剛好一位時接受。
-- **MssqlStore 尚未執行過**：資料表還沒建立，目前只測過 sqlite。
+- **MssqlStore 尚未執行過**：資料表還沒建立，目前只測過 sqlite（使用紀錄、使用者對應、候選、疑慮標記都是）。
+- **`remember` 還沒有真的寫進過 HRMS_MEMORY**：測試都用替身攔下寫入。第一次對真實資料表寫入時要確認記錄者與 `META` 內容正確。
+- **重複與候選的門檻未校準**，也沒有擋客戶資料（見寫入工具一節）。
 - **來源（ORIGIN）目前一律是真人對話**：排程與網站接上時要加上辨識方式。
 - **Codex 是否支援這種 HTTP 連線與之後的登入流程，尚未查證**。
 
@@ -144,3 +168,4 @@ py -3 servers/KB_ONLINE/run_server.py
 |---|---|
 | 2026-11-20 | 初版：11 項討論定案；完成骨架 |
 | 2026-11-21 | 完成查詢工具 `kb_search`、`kb_get`；線上版不回寫 `HIT_COUNT`；客製查詢併入 `kb_get(type=custom)` |
+| 2026-11-21 | 完成寫入工具 `remember`、`kb_flag`；重複判斷改成只比內容，其餘相似的存成候選；`memory_db.insert_memory` 加選填參數 `created_by` |

@@ -127,8 +127,10 @@ def load_all():
 
 def insert_memory(mem_type, topic, content, keywords="", func_path="",
                   entry_path="", entry_method="", supersedes_id=None,
-                  ref_key="", source="", meta=None):
-    """插入一筆記憶，回傳新 ID。"""
+                  ref_key="", source="", meta=None, created_by=None):
+    """插入一筆記憶，回傳新 ID。
+
+    created_by 未給時用本機設定的身分（created_by_ai）；線上知識庫 MCP 會帶入伺服器確認過的使用者。"""
     cur = _get_conn().cursor()
     cur.execute(
         f"SET NOCOUNT ON; "
@@ -138,7 +140,7 @@ def insert_memory(mem_type, topic, content, keywords="", func_path="",
         f"SELECT CAST(SCOPE_IDENTITY() AS INT)",
         (mem_type, topic, content, keywords or None, func_path or None,
          entry_path or None, entry_method or None, supersedes_id,
-         ref_key or None, source or None, created_by_ai(),
+         ref_key or None, source or None, created_by or created_by_ai(),
          json.dumps(meta, ensure_ascii=False) if meta else None))
     new_id = cur.fetchone()[0]
     invalidate_cache()

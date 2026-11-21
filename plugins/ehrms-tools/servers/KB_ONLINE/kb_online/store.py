@@ -26,6 +26,27 @@ def _usage_values(row):
     return [row.get(c) for c in USAGE_COLUMNS]
 
 
+CANDIDATE_COLUMNS = ("MEM_TYPE", "PURPOSE", "TOPIC", "CONTENT", "KEYWORDS", "FUNC_PATH", "ENTRY_PATH",
+                     "ENTRY_METHOD", "REF_KEY", "SOURCE", "CREATED_BY", "CONFLICT_MEMORY_ID", "SIMILARITY")
+FLAG_COLUMNS = ("TARGET_TYPE", "TARGET_ID", "REASON", "EVIDENCE", "JIRA_KEY", "FLAG_SOURCE",
+                "CANDIDATE_ID", "CREATED_BY")
+
+
+def _insert_sql(columns):
+    return f"INSERT INTO {{table}} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})"
+
+
+_CANDIDATE_INSERT, _FLAG_INSERT = _insert_sql(CANDIDATE_COLUMNS), _insert_sql(FLAG_COLUMNS)
+
+
+def _candidate_values(c):
+    return [c.get(col) for col in CANDIDATE_COLUMNS]
+
+
+def _flag_values(f):
+    return [f.get(col) for col in FLAG_COLUMNS]
+
+
 class SqliteStore:
     def __init__(self, path):
         os.makedirs(os.path.dirname(str(path)) or ".", exist_ok=True)
@@ -51,6 +72,14 @@ class SqliteStore:
                 CANDIDATE_ID INTEGER, USAGE_LOG_ID INTEGER, CREATED_BY TEXT NOT NULL,
                 CREATED_AT TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 STATUS TEXT NOT NULL DEFAULT 'open', RESOLVED_BY TEXT, RESOLVED_AT TEXT, RESOLVE_NOTE TEXT);
+            CREATE TABLE IF NOT EXISTS HRMS_KB_CANDIDATE (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT, MEM_TYPE TEXT NOT NULL, PURPOSE TEXT, TOPIC TEXT NOT NULL,
+                CONTENT TEXT NOT NULL, KEYWORDS TEXT, FUNC_PATH TEXT, ENTRY_PATH TEXT, ENTRY_METHOD TEXT,
+                REF_KEY TEXT, SOURCE TEXT, CREATED_BY TEXT NOT NULL,
+                CREATED_AT TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                CONFLICT_MEMORY_ID INTEGER NOT NULL, SIMILARITY REAL, USAGE_LOG_ID INTEGER,
+                STATUS TEXT NOT NULL DEFAULT 'open', RESOLVED_BY TEXT, RESOLVED_AT TEXT,
+                RESULT_MEMORY_ID INTEGER, RESOLVE_NOTE TEXT);
         """)
         self._conn.commit()
 
@@ -73,6 +102,20 @@ class SqliteStore:
         with self._lock:
             self._conn.execute(_USAGE_INSERT.format(table="HRMS_KB_USAGE_LOG"), _usage_values(row))
             self._conn.commit()
+
+    def add_candidate(self, c):
+        """存一筆候選，回傳編號。c 的鍵見 CANDIDATE_COLUMNS。"""
+        with self._lock:
+            cur = self._conn.execute(_CANDIDATE_INSERT.format(table="HRMS_KB_CANDIDATE"), _candidate_values(c))
+            self._conn.commit()
+            return cur.lastrowid
+
+    def add_flag(self, f):
+        """存一筆疑慮標記，回傳編號。f 的鍵見 FLAG_COLUMNS。"""
+        with self._lock:
+            cur = self._conn.execute(_FLAG_INSERT.format(table="HRMS_KB_FLAG"), _flag_values(f))
+            self._conn.commit()
+            return cur.lastrowid
 
     def open_flags(self):
         """待處理的疑慮標記：[{target_type, target_id, reason}]。"""
@@ -139,6 +182,20 @@ class MssqlStore:
         with self._lock:
             self._connect().cursor().execute(
                 _USAGE_INSERT.format(table="dbo.HRMS_KB_USAGE_LOG"), _usage_values(row))
+
+    def _insert_returning_id(self, sql, values):
+        cur = self._connect().cursor()
+        cur.execute(f"SET NOCOUNT ON; {sql}; SELECT CAST(SCOPE_IDENTITY() AS INT)", values)
+        return cur.fetchone()[0]
+
+    def add_candidate(self, c):
+        with self._lock:
+            return self._insert_returning_id(
+                _CANDIDATE_INSERT.format(table="dbo.HRMS_KB_CANDIDATE"), _candidate_values(c))
+
+    def add_flag(self, f):
+        with self._lock:
+            return self._insert_returning_id(_FLAG_INSERT.format(table="dbo.HRMS_KB_FLAG"), _flag_values(f))
 
     def open_flags(self):
         with self._lock:

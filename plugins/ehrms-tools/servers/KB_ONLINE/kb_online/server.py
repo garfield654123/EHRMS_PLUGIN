@@ -30,6 +30,7 @@ from .identity import IdentityService, JiraDirectory
 from .store import make_store
 from .tools_core import registry
 from . import tools_query  # noqa: F401  匯入即註冊 kb_search、kb_get
+from . import tools_write  # noqa: F401  匯入即註冊 remember、kb_flag
 from .usage_log import UsageLogger
 
 logger = logging.getLogger("kb_online")
@@ -45,6 +46,10 @@ EHRMS 線上知識庫。
 來源互相矛盾時的優先順序：有程式碼證據的記憶 ＞ Wiki ＞ 人工 FAQ／公告／SOP／Task ＞ AI 撰寫的 FAQ／SOP／Task
 ＞ Jira 結案紀錄（僅供參考）。標示「有疑慮」的知識引用前要另外查證。
 公司資料庫沒有客戶資料；Task 的 SQL 只是範本，須人工確認，不可自動執行。
+
+寫回：結論確認後、回覆使用者前，判斷這次有沒有跨案件可通用的新知識；有就用 remember 寫入（先用 kb_search 確認
+沒有相同內容，有對應 Jira 單要填 ref_key）。只寫已確認的結論，不寫推測，也不寫客戶的實際資料。
+線上版不能取代既有知識：發現既有知識可能有錯時用 kb_flag 提出疑慮並附依據。寫入或標記後，在回覆中列出編號。
 """
 
 
