@@ -72,6 +72,8 @@ servers/KB_ONLINE/
     tools_core.py      confirm_identity、kb_info
     tools_query.py     kb_search、kb_get
     tools_write.py     remember、kb_flag
+    tools_skill.py     skill_list、skill_get、常駐說明的 skill 索引
+  online_skills.json   線上版提供哪些 skill
     server.py          HTTP 連線層
 tests/test_kb_online.py
 ```
@@ -109,6 +111,17 @@ tests/test_kb_online.py
 - **沒有檢查內容是否含客戶資料**，目前只靠工具說明要求 AI 不要寫。
 - 為了讓記錄者是伺服器確認的使用者，`servers/MEMORY/memory_db.py` 的 `insert_memory` 多了一個選填參數 `created_by`；不給時行為與原本相同。這是線上版對 MEMORY 目錄唯一的修改。
 
+### skill 與常駐說明（`tools_skill.py`、`online_skills.json`）
+
+- skill 只有一份來源：`plugins/ehrms-tools/skills/<名稱>/SKILL.md`。線上版要提供哪些，由 `online_skills.json` 決定。
+- **新增一個線上 skill**：在 `skills/` 加資料夾，再在 `online_skills.json` 加一筆（`name`、`when`、選填的 `note`），重啟伺服器。同事不用做任何事。
+- `skill_get` 回傳時會在最前面加一段「本機工具 → 線上工具」對照表，以及該 skill 的線上補充說明（`note`），再接原本的流程全文。這樣 SKILL.md 不用為了線上版另外改寫。
+- 需要讀本機程式碼或執行腳本的 skill（bug-fix、debug、custom-sa-analyze 等）不放上來，留在 plugin。
+- 目前只提供 `crisis-triage`。`crisis-connection-email` 還在主工作目錄未提交，合併後在清單加一筆即可。
+- 常駐說明（連線時自動載入，約 1,200 字）內容：身分確認、查詢方式與依需求的重點、來源優先順序、**每次處理完都要判斷是否寫回**（沒寫要說明原因）、限制、skill 索引。
+- 「強制沉澱」目前靠常駐說明要求 AI 每次判斷並說明；伺服器端還沒有強制機制。使用紀錄可以算出「有查詢但沒有寫入」的連線，之後可據此做補沉澱。
+- 沒有做 MCP 的提示範本（prompts）；只用工具提供 skill，不依賴各用戶端對 skill 的支援。
+
 所有工具都經過 `Dispatcher.call()`，身分檢查與使用紀錄只寫在這一處。新增工具用 `@registry.tool(...)` 註冊，回傳 `ToolResult`（含回傳的知識編號、寫入結果等），紀錄會自動產生。
 
 ### 啟動與設定
@@ -139,7 +152,7 @@ py -3 servers/KB_ONLINE/run_server.py
 | 2 | 骨架：HTTP 伺服器、身分確認、使用紀錄與斷線補送 | 完成（2026-11-20），有單元測試與實際連線測試 |
 | 3 | 「搜尋」「取全文」兩個查詢工具（`kb_search`、`kb_get`） | 完成（2026-11-21），有單元測試，並對真實知識庫資料庫做過唯讀連線測試 |
 | 4 | `remember`（用途標記、衝突存候選並自動加疑慮標記）與疑慮標記工具 `kb_flag` | 完成（2026-11-21），有單元測試與連線測試；連線測試時 HRMS_MEMORY 的寫入以替身取代，沒有寫進真實資料表 |
-| 5 | 「列出 skill／取得 skill」與常駐說明 | 未開始 |
+| 5 | 「列出 skill／取得 skill」（`skill_list`、`skill_get`）與常駐說明 | 完成（2026-11-21），有單元測試與連線測試。尚未讓真正的 AI 用戶端照著跑過一張單 |
 | 6 | 部署到主機，先給少數同事試用 | 未開始，等主機 |
 | 7 | 之後：Jira MCP 上線、AI 助理對話接記憶、RAG、清理 agent | 未開始 |
 
@@ -153,6 +166,7 @@ py -3 servers/KB_ONLINE/run_server.py
 - **重複與候選的門檻未校準**，也沒有擋客戶資料（見寫入工具一節）。
 - **來源（ORIGIN）目前一律是真人對話**：排程與網站接上時要加上辨識方式。
 - **Codex 是否支援這種 HTTP 連線與之後的登入流程，尚未查證**。
+- **還沒有用真正的 AI 用戶端（Claude Code 等）接上來跑過**：目前的連線測試是用程式直接呼叫工具。AI 會不會照常駐說明先取 skill、處理完會不會做寫回判斷，要實際接上才知道。
 
 ## 8. 待補事項（不擋實作）
 
@@ -168,4 +182,5 @@ py -3 servers/KB_ONLINE/run_server.py
 |---|---|
 | 2026-11-20 | 初版：11 項討論定案；完成骨架 |
 | 2026-11-21 | 完成查詢工具 `kb_search`、`kb_get`；線上版不回寫 `HIT_COUNT`；客製查詢併入 `kb_get(type=custom)` |
+| 2026-11-21 | 完成 `skill_list`、`skill_get` 與常駐說明；線上 skill 由 `online_skills.json` 指定，取得時自動加上工具對照表 |
 | 2026-11-21 | 完成寫入工具 `remember`、`kb_flag`；重複判斷改成只比內容，其餘相似的存成候選；`memory_db.insert_memory` 加選填參數 `created_by` |
