@@ -18,6 +18,9 @@
    ② HRMS_KB_CANDIDATE   remember 撞到「高度相似但結論不同」時，新內容存在這裡，不進正式記憶
    ③ HRMS_KB_FLAG        疑慮標記：某筆知識可能有錯
    ④ HRMS_KB_USER_BINDING 電腦位址對應到哪位使用者（首次使用確認信箱後記住）
+
+   2026-11-25 新增第五張（同日已建立）：
+   ⑤ HRMS_MEMORY_NOTE     工作筆記：知識庫以外查到的新結論與使用者的修正，審核後才進 HRMS_MEMORY
    ===================================================================== */
 
 ------------------------------------------------------------------
@@ -232,6 +235,61 @@ END
 GO
 
 ------------------------------------------------------------------
+-- ⑤ 工作筆記（2026-11-25，SPEC 決策 17）：每次處理中「知識庫以外」得到的結論
+--    要存：另外查出來的新結論（例如看程式碼得到的）、使用者對 AI 的修正
+--    不存：結論完全來自知識庫 MCP 查詢結果的
+--    不是正式記憶、不會被查詢工具查到；等審核 agent 確認後才寫入 HRMS_MEMORY
+--    2026-11-25 已建立
+------------------------------------------------------------------
+IF OBJECT_ID(N'dbo.HRMS_MEMORY_NOTE') IS NULL
+BEGIN
+CREATE TABLE dbo.HRMS_MEMORY_NOTE (
+    ID               INT IDENTITY(1,1) NOT NULL
+        CONSTRAINT PK_HRMSMEMNOTE PRIMARY KEY,
+
+    -- ── 筆記本體 ─────────────────────────────────────────
+    NOTE_KIND        VARCHAR(20)    NOT NULL
+        CONSTRAINT CK_HRMSMEMNOTE_KIND CHECK (NOTE_KIND IN
+            ('finding',      -- 知識庫以外查出來的新結論（看程式碼等）
+             'correction')), -- 使用者對 AI 的修正
+    TOPIC            NVARCHAR(100)  NOT NULL,   -- 主題
+    CONTENT          NVARCHAR(4000) NOT NULL,   -- 結論
+    EVIDENCE         NVARCHAR(2000) NULL,       -- 依據：程式位置、使用者的原話
+    KEYWORDS         NVARCHAR(300)  NULL,       -- 逗號分隔
+    ENTRY_PATH       NVARCHAR(500)  NULL,       -- 程式入口（看程式碼得到的結論才有）
+    ENTRY_METHOD     NVARCHAR(300)  NULL,
+
+    -- ── 來源 ─────────────────────────────────────────────
+    REF_KEY          NVARCHAR(50)   NULL,       -- 對話有提到 Jira 單才有值（決策 7）；欄位名沿用 HRMS_MEMORY
+    ORIGIN           VARCHAR(20)    NOT NULL    -- chat=Claude Code 等對話 / web=FAQ_web AI 助理 / schedule=排程
+        CONSTRAINT CK_HRMSMEMNOTE_ORIGIN CHECK (ORIGIN IN ('chat','web','schedule')),
+    SESSION_ID       VARCHAR(36)    NULL,       -- 同一次連線，可對回使用紀錄
+    USAGE_LOG_ID     BIGINT         NULL,       -- 對應的使用紀錄
+    CREATED_BY       NVARCHAR(100)  NOT NULL,   -- 如 ziping.zhou(AI)
+    CREATED_AT       DATETIME2(0)   NOT NULL
+        CONSTRAINT DF_HRMSMEMNOTE_CRE DEFAULT SYSDATETIME(),
+
+    -- ── 處理結果（MCP 帳號不可寫，只由人或審核 agent 更新）──
+    STATUS           VARCHAR(10)    NOT NULL
+        CONSTRAINT DF_HRMSMEMNOTE_STATUS DEFAULT 'open'
+        CONSTRAINT CK_HRMSMEMNOTE_STATUS CHECK (STATUS IN
+            ('open',       -- 待審核
+             'promoted',   -- 結論正確，已寫成正式記憶（見 RESULT_MEMORY_ID）
+             'rejected')), -- 不採用
+    RESOLVED_BY      NVARCHAR(100)  NULL,
+    RESOLVED_AT      DATETIME2(0)   NULL,
+    RESULT_MEMORY_ID INT            NULL        -- 升級後產生的正式記憶
+        CONSTRAINT FK_HRMSMEMNOTE_MEMORY REFERENCES dbo.HRMS_MEMORY(ID),
+    RESOLVE_NOTE     NVARCHAR(1000) NULL
+);
+
+CREATE INDEX IX_HRMSMEMNOTE_STATUS ON dbo.HRMS_MEMORY_NOTE (STATUS, CREATED_AT);
+CREATE INDEX IX_HRMSMEMNOTE_REF    ON dbo.HRMS_MEMORY_NOTE (REF_KEY)
+    WHERE REF_KEY IS NOT NULL;
+END
+GO
+
+------------------------------------------------------------------
 -- 權限（★ 執行前把帳號換成實際的 database user）
 --
 -- 目前決定先沿用現有帳號，所以下面先全部註解。
@@ -256,3 +314,10 @@ GO
 --     ON dbo.HRMS_KB_CANDIDATE TO [<清理帳號>];
 -- GRANT UPDATE (STATUS, RESOLVED_BY, RESOLVED_AT, RESOLVE_NOTE)
 --     ON dbo.HRMS_KB_FLAG TO [<清理帳號>];
+--
+-- 工作筆記（⑤）
+-- GRANT SELECT, INSERT ON dbo.HRMS_MEMORY_NOTE TO [<知識庫帳號>];
+-- DENY  UPDATE, DELETE ON dbo.HRMS_MEMORY_NOTE TO [<知識庫帳號>];
+-- GRANT SELECT ON dbo.HRMS_MEMORY_NOTE TO [<清理帳號>];
+-- GRANT UPDATE (STATUS, RESOLVED_BY, RESOLVED_AT, RESULT_MEMORY_ID, RESOLVE_NOTE)
+--     ON dbo.HRMS_MEMORY_NOTE TO [<清理帳號>];
