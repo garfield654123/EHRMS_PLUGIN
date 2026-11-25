@@ -59,9 +59,26 @@ def _ai_tag(author):
 
 
 PURPOSE_LABELS = {"reply": "可回覆客戶", "procedure": "處理步驟", "data_fix": "資料修正語法", "general": "一般知識"}
-# 決策 17：漏寫工作筆記的補法是把提醒放進查詢結果，只接網址、沒裝 plugin 的同事也看得到
-NOTE_REMINDER = ("→ 處理完若有知識庫以外的新結論（例如看程式碼查到的）或使用者的修正，"
-                 "請用 kb_note 寫工作筆記；結論都來自知識庫就不用寫。")
+def note_reminder(stats):
+    """查詢結果結尾的工作筆記提醒（決策 17、23）：帶這個連線的實際數字，比固定一句話不容易被略過。"""
+    lookups, notes = stats["lookups"], stats["notes"]
+    if notes:
+        return (f"📝 本次連線已查詢 {lookups} 次、已寫 {notes} 筆工作筆記。之後每讀一段程式碼、資料表結構或 Jira 單，"
+                f"就當場再記一筆，不要等到回覆前。")
+    return (f"⚠ 本次連線已查詢 {lookups} 次，尚未寫工作筆記。這輪只要讀過程式碼、資料表結構或 Jira 單，或被使用者糾正，"
+            f"現在就用 kb_note 記一筆（只填 topic、content；不需確認、對錯不論，寫錯由審核處理），"
+            f"或在下次 kb_search 帶 note 順手寫。只查知識庫的不用寫。")
+
+
+def _with_reminder(call, result, looked_up):
+    """有查到東西或查無資料時，把這次算進查詢次數並在結尾附提醒；參數錯誤、找不到編號時不附。"""
+    if looked_up:
+        stats = call.services.activity(call.ctx.session_id)
+        stats["lookups"] += 1
+        result.text += "\n\n" + note_reminder(stats)
+    return result
+
+
 DATA_FIX_NOTE = "⚠️ 這筆含修正資料的語法，僅供參考：須人工確認參數與影響範圍後才可執行，AI 不可自動執行。"
 
 
@@ -218,7 +235,6 @@ def _search_sync(store, query, sources, top_k, customer_code, with_version):
         lines.append("\n→ 以上只是摘要。要引用前請用 kb_get(type, id) 讀全文；Wiki 可加 section（規則編號如 R7、章節名、全文）。")
         if any(r["type"] == "task" for r in refs):
             lines.append("→ Task 的 SQL 只是範本，須人工確認參數與影響範圍，不可自動執行。")
-    lines.append(("" if refs else "\n") + NOTE_REMINDER)     # 查無資料時更可能另外去查，一樣提醒
     return ToolResult("\n".join(lines), refs=refs, no_result=not refs, query_text=query,
                       error=("；".join(failed) or None) if failed else None)
 
@@ -228,7 +244,8 @@ def _search_sync(store, query, sources, top_k, customer_code, with_version):
     "搜尋 EHRMS 知識庫，一次查全部來源：Wiki（系統原則與規則）、團隊記憶、FAQ、SOP、Task 罐頭語法、"
     "Jira 結案紀錄、公告。回傳各來源最相關的幾筆摘要與編號，要引用前用 kb_get 讀全文。"
     "處理 Jira 單時請把單號寫進 query 或 jira_key。回報的是錯誤或異常、要比對是不是已知版更問題時，"
-    "加上 version_bulletins=true 會整批列出版更公告。",
+    "加上 version_bulletins=true 會整批列出版更公告。"
+    "可以用 note 順手留一筆工作筆記（這次在查什麼、已經看過什麼、目前的假設），不用另外呼叫 kb_note。",
     {"type": "object",
      "properties": {
          "query": {"type": "string", "description": "問題或現象敘述（中文），可含代碼、資料表名、錯誤訊息"},
@@ -238,6 +255,9 @@ def _search_sync(store, query, sources, top_k, customer_code, with_version):
          "jira_key": {"type": "string", "description": "正在處理的 Jira 單號（可選）"},
          "customer_code": {"type": "string", "description": "客戶統編；有給才會回傳該客戶的客製 Wiki 頁"},
          "version_bulletins": {"type": "boolean", "description": "true＝另外整批列出版更公告"},
+         "note": {"type": "string",
+                  "description": "順手寫的工作筆記（可選，4000 字內）：這次在查什麼、已經讀過哪些程式碼或單、目前的假設。"
+                                 "伺服器會存成過程紀錄，不需確認、對錯不論；不要寫客戶的實際資料"},
      },
      "required": ["query"]})
 async def kb_search(call, args):
@@ -250,7 +270,30 @@ async def kb_search(call, args):
         with _LOCK:
             return _search_sync(store, query, sources, top_k, (args.get("customer_code") or "").strip() or None,
                                 bool(args.get("version_bulletins")))
-    return await anyio.to_thread.run_sync(run)
+    result = await anyio.to_thread.run_sync(run)
+    note = str(args.get("note") or "").strip()
+    if note:
+        await _piggyback_note(call, result, query, note, str(args.get("jira_key") or "").strip())
+    return _with_reminder(call, result, looked_up=result.no_result is not None)
+
+
+async def _piggyback_note(call, result, query, note, jira_key):
+    """kb_search 帶 note：查詢當下順手存一筆過程紀錄。筆記寫不進去不影響查詢結果。"""
+    from . import tools_note
+    from .dispatch import find_jira_key
+    ref_key = (jira_key or find_jira_key({"query": query, "note": note}) or "")[:50]
+    cut = len(note) > 4000
+    try:
+        note_id = await tools_note.save(call, {
+            "kind": "process", "topic": f"查詢：{query}"[:100] or "查詢", "content": note[:4000], "ref_key": ref_key})
+    except Exception as e:
+        result.text += f"\n\n⚠️ note 沒有寫成工作筆記：{type(e).__name__}: {e}"
+        result.write_outcome = "failed"
+        result.error = "；".join(x for x in (result.error, f"note: {type(e).__name__}: {e}") if x)
+        return
+    result.text += (f"\n\n📝 已把 note 存成工作筆記 note#{note_id}（過程紀錄）"
+                    f"{'；超過 4000 字的部分沒有存' if cut else ''}。")
+    result.write_outcome, result.write_ref = "created", f"note#{note_id}"
 
 
 # ── kb_get：取單筆全文 ───────────────────────────────────────────
@@ -346,7 +389,6 @@ def _get_sync(store, kind, rid, section, customer_code):
     reasons = _flag_notes(store).get((kind, str(found_id)), [])
     if reasons:
         text += "\n\n⚠ 這筆知識有待處理的疑慮：\n" + "\n".join(f"- {r}" for r in reasons)
-    text += "\n\n" + NOTE_REMINDER
     return ToolResult(text, refs=[{"type": kind, "id": found_id, "score": None}], no_result=False)
 
 
@@ -374,4 +416,5 @@ async def kb_get(call, args):
         with _LOCK:
             return _get_sync(store, kind, rid, (args.get("section") or "").strip() or None,
                              (args.get("customer_code") or "").strip() or None)
-    return await anyio.to_thread.run_sync(run)
+    result = await anyio.to_thread.run_sync(run)
+    return _with_reminder(call, result, looked_up=result.no_result is False)

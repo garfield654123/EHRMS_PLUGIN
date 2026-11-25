@@ -89,12 +89,19 @@ class Dispatcher:
         self.usage = usage_logger
         self.server_version, self.search_version = server_version, search_version
         self._seq = {}   # session_id → 已呼叫次數
+        self._activity = {}   # session_id → {lookups: 查詢次數, notes: 已寫的工作筆記數}；只在記憶體，重啟歸零
 
     def _next_seq(self, session_id):
         if len(self._seq) > 20000:      # 連線很多時清掉舊的計數，避免無限成長
             self._seq.clear()
         self._seq[session_id] = self._seq.get(session_id, 0) + 1
         return self._seq[session_id]
+
+    def activity(self, session_id):
+        """這個連線到目前為止查了幾次、寫了幾筆工作筆記；查詢結果結尾的提醒用這個數字。"""
+        if session_id not in self._activity and len(self._activity) > 20000:
+            self._activity.clear()
+        return self._activity.setdefault(session_id, {"lookups": 0, "notes": 0})
 
     async def call(self, ctx, name, arguments):
         """執行一次工具呼叫，回傳要給用戶端的文字。任何情況都會留下一筆使用紀錄。"""

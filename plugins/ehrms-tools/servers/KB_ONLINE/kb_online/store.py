@@ -58,6 +58,22 @@ def _note_values(n):
     return [n.get(col) for col in NOTE_COLUMNS]
 
 
+PROCESS_MARK = "〔過程紀錄〕"
+
+
+def note_as_finding(n):
+    """資料表的種類限制還沒加上 process 時的相容寫法：改存成 finding，內容最前面加上標記。
+
+    建表語法的補丁（hrms_kb_online.sql「補丁（2026-11-25）」）套用後就不會走到這裡。"""
+    out = dict(n, NOTE_KIND="finding")
+    out["CONTENT"] = (PROCESS_MARK + (n.get("CONTENT") or ""))[:4000]
+    return out
+
+
+def is_kind_constraint_error(e):
+    return "CK_HRMSMEMNOTE_KIND" in str(e)
+
+
 class SqliteStore:
     def __init__(self, path):
         os.makedirs(os.path.dirname(str(path)) or ".", exist_ok=True)
@@ -223,8 +239,14 @@ class MssqlStore:
             return self._insert_returning_id(_FLAG_INSERT.format(table="dbo.HRMS_KB_FLAG"), _flag_values(f))
 
     def add_note(self, n):
+        sql = _NOTE_INSERT.format(table="dbo.HRMS_MEMORY_NOTE")
         with self._lock:
-            return self._insert_returning_id(_NOTE_INSERT.format(table="dbo.HRMS_MEMORY_NOTE"), _note_values(n))
+            try:
+                return self._insert_returning_id(sql, _note_values(n))
+            except Exception as e:
+                if n.get("NOTE_KIND") != "process" or not is_kind_constraint_error(e):
+                    raise
+                return self._insert_returning_id(sql, _note_values(note_as_finding(n)))
 
     def open_flags(self):
         with self._lock:

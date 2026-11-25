@@ -102,35 +102,34 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="note_log",
             description=(
-                "寫一筆工作筆記（HRMS_MEMORY_NOTE）：把這次處理中「知識庫以外」得到的結論留下來，"
-                "不需要等結論確認，也不需要先問使用者。\n"
-                "什麼時候要寫：① 查問題過程中另外查出來的新結論，特別是讀程式碼追出來的，"
-                "也包含查資料表結構、實際測試得到的（kind=finding）；"
-                "② 使用者糾正了你的說法或補充了你不知道的事（kind=correction）。回覆使用者之前寫，一個結論一筆。\n"
-                "什麼不用寫：結論完全來自知識庫查詢結果的（recall、wiki_lookup、jira_lookup、faq_lookup 等查到的，"
-                "知識庫裡本來就有）；已經用 remember 或 jira_log 寫入的；沒有新結論時不用寫，也不必向使用者說明。\n"
-                "content 寫結論本身（是什麼、在什麼條件下成立），evidence 寫依據：finding 寫程式位置或查證方式，"
-                "correction 寫使用者的原話。不要寫客戶的實際資料（公司名稱、統編、員工姓名、帳號、薪資等），"
-                "改用一般化的描述。\n"
-                "工作筆記不是正式記憶，recall 等查詢工具查不到；之後審核確認正確才會升級成團隊記憶。"
-                "已確認且跨單可通用的結論仍用 remember，案件的結案紀錄仍用 jira_log。"
+                "寫一筆工作筆記（HRMS_MEMORY_NOTE），記下這次處理的過程或結論。"
+                "**不需要確認，對錯不論，寫錯會由審核處理**，所以不用猶豫，也不需要先問使用者。\n"
+                "什麼時候寫（看做了什麼動作，不用判斷有沒有結論）：這輪只要 ① 讀過程式碼、② 查過資料表結構、"
+                "③ 讀過 Jira 單，或 ④ 被使用者糾正或補充，就寫。查到就當場寫，不要等到回覆前；一件事一筆，同一輪可以寫很多筆。\n"
+                "只要填 topic 與 content。kind 可不填（預設 process）：process=過程紀錄（做了什麼、查到什麼、卡在哪、目前的假設），"
+                "沒有結論也能寫；finding=查出來的結論；correction=使用者的修正（evidence 寫使用者的原話）。\n"
+                "唯一不用寫的情況：這輪只查了知識庫（recall、wiki_lookup、jira_lookup、faq_lookup 等），沒有做上面任何一個動作。\n"
+                "不要寫客戶的實際資料（公司名稱、統編、員工姓名、帳號、薪資等），改用一般化的描述。\n"
+                "工作筆記不是正式記憶，recall 等查詢工具查不到；審核確認正確才會升級成團隊記憶。"
+                "remember 與 jira_log 才需要「結論已確認」，兩者不要混在一起。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["finding", "correction"],
-                             "description": "finding=知識庫以外查出來的新結論 / correction=使用者對 AI 的修正"},
                     "topic": {"type": "string", "description": "主題短標題（100 字內）"},
-                    "content": {"type": "string", "description": "結論（4000 字內）"},
+                    "content": {"type": "string",
+                                "description": "內容（4000 字內）：做了什麼、查到什麼、卡在哪，或結論是什麼"},
+                    "kind": {"type": "string", "enum": ["process", "finding", "correction"],
+                             "description": "可不填，預設 process（過程紀錄）；finding=查出來的結論；correction=使用者的修正"},
                     "evidence": {"type": "string",
-                                 "description": "依據：程式位置、查證方式，或使用者的原話（2000 字內）；盡量填"},
+                                 "description": "依據：程式位置、查證方式，或使用者的原話（可選，2000 字內）"},
                     "keywords": {"type": "string", "description": "關鍵字，逗號分隔（可選）"},
                     "entry_path": {"type": "string",
-                                   "description": "程式入口的 repo 相對路徑，如 VB/EHRMS/xx.cls；讀程式碼得到的結論才填"},
+                                   "description": "程式入口的 repo 相對路徑，如 VB/EHRMS/xx.cls（可選）"},
                     "entry_method": {"type": "string", "description": "入口函式（可選）"},
                     "ref_key": {"type": "string", "description": "這次處理的 Jira 單號，如 EHRMSONE-32543；有對應的單才填"},
                 },
-                "required": ["kind", "topic", "content"],
+                "required": ["topic", "content"],
             },
         ),
         Tool(
@@ -430,8 +429,20 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# 回傳結尾要附工作筆記提醒的查詢工具（決策 23）
+LOOKUP_TOOLS = ("recall", "jira_lookup", "faq_lookup", "bulletin_lookup", "version_bulletins", "task_lookup",
+                "sop_lookup", "wiki_lookup", "custom_lookup")
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[dict]:
+    out = await _dispatch(name, arguments)
+    if name in LOOKUP_TOOLS:
+        out = _text(nc.with_reminder(out[0]["text"]))
+    return out
+
+
+async def _dispatch(name: str, arguments: dict) -> list[dict]:
     if name == "recall":
         return _text(mc.recall(
             arguments["question"], arguments.get("kind"), arguments.get("top_k", 3)))
@@ -447,13 +458,13 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
             supersedes=arguments.get("supersedes", ""),
             force=bool(arguments.get("force", False))))
     if name == "note_log":
-        return _text(nc.log_note(
-            arguments.get("kind", ""), arguments.get("topic", ""), arguments.get("content", ""),
+        return _text(nc.count_note(nc.log_note(
+            arguments.get("topic", ""), arguments.get("content", ""), kind=arguments.get("kind", ""),
             evidence=arguments.get("evidence", ""),
             keywords=arguments.get("keywords", ""),
             entry_path=arguments.get("entry_path", ""),
             entry_method=arguments.get("entry_method", ""),
-            ref_key=arguments.get("ref_key", "")))
+            ref_key=arguments.get("ref_key", ""))))
     if name == "jira_lookup":
         return _text(jc.lookup(
             arguments["query"], arguments.get("kind"), arguments.get("top_k", 5)))

@@ -38,6 +38,7 @@
 | 20 | FAQ_web AI 助理的專用記憶（2026-11-25） | 與 `HRMS_MEMORY`、工作筆記**分開**，是 AI 助理自己用的記憶，內容是「怎麼回應」而不是系統知識，例如回覆顧問時避免工程用語。做法比照一般 LLM 的記憶機制：排程定時把新增的對話整理進一份「記憶摘要」，之後每次對話自動帶入。系統知識類的結論不放這裡，走工作筆記（決策 19）。這是 FAQ_web 端的功能，不在本伺服器內。排程整理出的內容直接生效，不設審核關卡；FAQ_web 提供一個簡單頁面，可以查看與編修目前的助理記憶。**已實作（2026-11-25，在 `C:\D\FAQ_web`，尚未 commit）**：記憶存在 FAQ_web 的 `chat.db`（`assistant_memory`、`assistant_memory_runs` 兩張表），一則一列，可指定適用角色（全部／顧問／FAE／工程）；伺服器啟動後每天 2 點之後整理一次（`ASSISTANT_MEMORY_HOUR` 可調，`ASSISTANT_MEMORY_SCHEDULE=0` 停用），也可在頁面按「立即整理」；只整理啟用之後新增的對話，不回頭處理歷史；啟用中的記憶接在系統提示詞最後，修改後對新開始的對話生效；頁面在側欄「助理記憶」（`/assistant-memory`）。程式在 `server/services/assistant_memory.py`、`server/routes/assistant_memory.py`、`client/src/pages/AssistantMemoryPage.js`。已用對話資料庫的副本驗證整理、帶入提示詞與頁面的新增／修改／停用／刪除；**沒有實際開一段 AI 對話確認助理照記憶回答，排程的定時觸發也沒有等到實際時間驗證** |
 | 21 | jira-auto-log 的取單條件（2026-11-25） | 既有排程只抓「現在是 CS CONFIRM」的單，會漏。2026-11-25 查證近 30 天結案的單：抽 6 張，停在 CS CONFIRM 的時間有 0 分鐘、2 分鐘、約 2 小時的，排程約一天跑一次抓不到；略過清單 11-22 至 11-24 沒有紀錄，跨過那幾天的單（如 EHRMSONE-34918）也沒被處理；抽查確定漏掉 3 張（34967、34933、34918）。改成：抓「最近幾天曾經是 CS CONFIRM」的單，已結案的也算（天數未定），並搭配決策 18 避免重跑。另有 37 張沒經過 CS CONFIRM 就結案（Crisis - Level C 11、Crisis X 9、Story 15、客製 1、Bug 1），**這次不納入**，等新條件跑一陣子再評估。**已修改（2026-11-25）**：取單條件實際寫死在 `C:\D\JIRA_AI\run_jira_auto_log.py`（不是 SKILL.md），已改成 `status WAS "CS CONFIRM" DURING (startOfDay(-7d), now())`、較舊的先處理，並加上 `--dry-run`（只列候選單，不分析、不寫入）。試跑結果：候選 312 張（改之前當晚是 166 張），未處理 66 張，每次上限 20 張；先前漏掉的 34967、34933、34918 用同一個條件查得到。`C:\D\JIRA_AI` 的修改尚未 commit；還沒有經過一次真正的排程執行。SKILL.md 的文字沒有改（排程會覆寫它的步驟 1） |
 | 22 | 本機 plugin 也寫工作筆記（2026-11-25） | 工程師平常是用本機 plugin 的 `ehrms-memory` 排查維運單，不是線上版；本機這條路不會強制寫入 `HRMS_MEMORY`，排查中讀程式碼得到的結論常常沒留下來，而決策 17 的 `kb_note` 只有線上版有。所以本機 `ehrms-memory` 新增 `note_log`（名稱比照本機的 `faq_log`、`sop_log`、`task_log`），寫同一張 `HRMS_MEMORY_NOTE`，參數與規則同 `kb_note`：不查重、不讀取，`recall` 等查詢工具查不到。記錄者比照本機 `remember`（`MEMORY_USER` 加 `(AI)`）；`ORIGIN` 一律 `chat`；`SESSION_ID` 是 MCP 行程啟動時產生的編號（本機沒有連線編號，同一次對話的筆記會是同一個值）；本機沒有使用紀錄，`USAGE_LOG_ID` 留空。提醒寫在三處：工具說明、常駐說明 `context.md` 的「寫回」、`crisis-triage` 第 6 步；正式知識「已確認才寫」的規則不變，工作筆記是例外。與線上版的差別：本機查詢工具的回傳結果**沒有**附提醒（沒有改 `recall` 等工具的輸出）。程式在 `servers/MEMORY/note_core.py`。**要等 plugin 發版、同事更新安裝後才會生效**（已安裝的是快取裡的 3.13.0，從 GitHub `main` 安裝） |
+| 23 | 工作筆記的寫入流程調整（2026-11-25） | 子平實際用 Claude Code 測試後，由那次對話的 AI 自己檢討漏寫的原因，子平據此定案。**修正決策 17 的寫入條件**：① **改成動作觸發**：不再要 AI 判斷「有沒有知識庫以外的新結論」（要判斷就會打折），改成這輪只要讀過程式碼、查過資料表結構、讀過 Jira 單，或被使用者糾正，就寫；明講不需要確認、對錯不論、寫錯由審核處理。唯一不用寫的情況是這輪只查了知識庫。② **嚴格與寬鬆分開**：常駐說明把工作筆記獨立成段、放在最前面、語氣是一定要做；「確認後才寫」只留在正式知識那一段。③ **搭便車**：`kb_search` 加選填的 `note`，查詢當下順手存成過程紀錄，不用另外呼叫工具。④ **提醒帶數字**：查詢結果結尾改成「本次連線已查詢 N 次，尚未寫工作筆記」或「已寫 M 筆」，數字由伺服器依連線統計。⑤ **降低門檻**：只有主題與內容必填，種類可不填；新增種類 `process`（過程紀錄：做了什麼、查到什麼、卡在哪、目前的假設），沒有結論也能寫，是沒給種類時的預設值。⑥ **提早寫**：查到就當場寫，不要等回覆前。⑦ **不只靠 skill**：主要的觸發放在常駐說明與工具回傳，`crisis-triage` 只是輔助（那次測試 AI 根本沒有取 skill）。⑧ **事後稽核**：統計有查詢卻沒有筆記的連線，查詢語法在 `hrms_kb_online.sql`。本機 plugin 的 `note_log`、`context.md`、`crisis-triage` 同步調整（本機沒有 `note` 搭便車，原因見第 7 節）。資料表的種類限制要加上 `process`，**補丁尚未套用**（語法在 `hrms_kb_online.sql`「補丁（2026-11-25）」）；套用前過程紀錄會存成 `finding`、內容最前面加「〔過程紀錄〕」 |
 
 ## 3. 清理 agent 要回答的問題
 
@@ -93,12 +94,14 @@ tests/test_kb_online*.py   骨架、查詢、寫入、工作筆記、填寫、sk
 
 | 工具 | 行為 |
 |---|---|
-| `kb_search(query, sources?, top_k?, jira_key?, customer_code?, version_bulletins?)` | 一次查 Wiki、團隊記憶、FAQ、SOP、Task、Jira 結案紀錄、公告；每個來源各回傳前幾筆（預設 3），分區顯示、不硬排成一條。回傳摘要與編號（如 `[faq#48]`），不含全文與 SQL。`version_bulletins=true` 另外整批列出版更公告。某個來源查詢失敗時會明講，不當成查無資料 |
+| `kb_search(query, sources?, top_k?, jira_key?, customer_code?, version_bulletins?, note?)` | 一次查 Wiki、團隊記憶、FAQ、SOP、Task、Jira 結案紀錄、公告；每個來源各回傳前幾筆（預設 3），分區顯示、不硬排成一條。回傳摘要與編號（如 `[faq#48]`），不含全文與 SQL。`version_bulletins=true` 另外整批列出版更公告。某個來源查詢失敗時會明講，不當成查無資料 |
 | `kb_get(type, id, section?, customer_code?)` | 讀單筆全文。Wiki 可指定規則編號、章節名、上半／下半／全文；Jira 可用紀錄編號或單號；`type=custom` 查某客戶的客製（取代 `custom_lookup`） |
 
 - 評分與資料讀取沿用 `servers/MEMORY` 的程式，沒有修改那邊的任何檔案；本機 plugin 的 9 個查詢工具不受影響。
 - **不回寫 `HIT_COUNT`**：本機 `recall` 每次命中會把引用次數加一，線上版不做，引用次數改由使用紀錄計算。
 - 待處理的疑慮標記會顯示在搜尋結果與全文上（標記的寫入在步驟 4）。
+- `kb_search` 帶 `note` 時，伺服器把它存成一筆工作筆記（種類 `process`，主題是「查詢：」加查詢文字，單號取自 `jira_key` 或文字裡的單號），超過 4000 字的部分不存。筆記寫不進去不影響查詢結果。這次呼叫的使用紀錄會同時有查詢結果與 `WRITE_OUTCOME=created`、`WRITE_REF=note#編號`。
+- `kb_search`、`kb_get` 有查到東西或查無資料時，結尾附工作筆記提醒，內容帶這個連線的查詢次數與已寫筆數（`Dispatcher.activity()`，只存在記憶體，伺服器重啟歸零）。
 - 檢索品質與本機版相同（關鍵字與字詞比對），這一步沒有改善檢索本身；之後用 `shadow_set.db` 量測。
 
 ### 寫入工具（`tools_write.py`）
@@ -124,11 +127,11 @@ tests/test_kb_online*.py   骨架、查詢、寫入、工作筆記、填寫、sk
 
 ### 工作筆記工具（`tools_note.py`，決策 17）
 
-`kb_note(kind, topic, content, evidence?, keywords?, entry_path?, entry_method?, ref_key?)`：寫一筆工作筆記到 `HRMS_MEMORY_NOTE`，不需要先確認結論。
+`kb_note(topic, content, kind?, evidence?, keywords?, entry_path?, entry_method?, ref_key?)`：寫一筆工作筆記到 `HRMS_MEMORY_NOTE`，不需要先確認結論、對錯不論。寫不寫看做了什麼動作（讀過程式碼、查過資料表結構、讀過 Jira 單、被使用者糾正），不看有沒有結論（決策 23）。
 
 | 參數 | 欄位 | 說明 |
 |---|---|---|
-| `kind` | `NOTE_KIND` | `finding`＝知識庫以外查出來的新結論；`correction`＝使用者對 AI 的修正 |
+| `kind` | `NOTE_KIND` | 選填，預設 `process`＝過程紀錄（做了什麼、查到什麼、卡在哪）；`finding`＝知識庫以外查出來的結論；`correction`＝使用者對 AI 的修正。資料表補丁套用前，`process` 會存成 `finding`、內容最前面加「〔過程紀錄〕」（每寫一筆會跳過一個編號，因為第一次寫入失敗也會用掉編號） |
 | `topic`／`content` | `TOPIC`／`CONTENT` | 必填；100 字／4000 字 |
 | `evidence` | `EVIDENCE` | 依據：程式位置、查證方式，或使用者的原話；選填，2000 字 |
 | `keywords`、`entry_path`、`entry_method` | 同名欄位 | 選填。`entry_path` 能轉成 repo 相對路徑就轉，轉不了照原樣存，不因此擋下 |
@@ -141,7 +144,7 @@ tests/test_kb_online*.py   骨架、查詢、寫入、工作筆記、填寫、sk
 - 不做重複檢查，也不與既有記憶比對：同樣內容寫兩次就是兩筆，判斷留給審核。
 - **查詢工具查不到工作筆記**：`kb_search`、`kb_get`、`kb_flag` 都沒有 `note` 這個類型，資料層對這張表只有新增（`add_note`），沒有任何讀取的方法；有單元測試守著這一點。
 - 不需要知識庫資料庫（`MSSQL_*` 的查詢用連線）也能寫，只用 store 的連線。
-- 漏寫的補法（不強制）：① 工具說明寫清楚什麼時候該寫、什麼不用寫；② `kb_search` 與 `kb_get` 有查到東西或查無資料時，回傳結果最後附一行提醒（`tools_query.NOTE_REMINDER`）；參數錯誤、找不到編號時不附；③ 常駐說明有「工作筆記」一節；④ `skill_get` 的對照表有 `note_log` → `kb_note` 一列（本機的對應工具見決策 22）。
+- 漏寫的補法（不強制，決策 23 調整過）：① 工具說明寫成動作觸發；② `kb_search` 與 `kb_get` 有查到東西或查無資料時，回傳結果最後附帶數字的提醒（`tools_query.note_reminder`）；參數錯誤、找不到編號時不附；`kb_search` 可帶 `note` 順手寫；③ 常駐說明有「工作筆記」一節；④ `skill_get` 的對照表有 `note_log` → `kb_note` 一列（本機的對應工具見決策 22）。
 - **沒有檢查內容是否含客戶資料**，只靠工具說明要求 AI 不要寫。
 
 ### 填寫工具（`tools_contribute.py`）
@@ -225,6 +228,7 @@ py -3 servers/KB_ONLINE/run_server.py
 | 9 | jira-auto-log 略過的單有新內容才重跑（決策 18）；取單改抓最近曾經是 CS CONFIRM 的單（決策 21） | 決策 21 完成（2026-11-25，改在 `C:\D\JIRA_AI\run_jira_auto_log.py`，試跑通過，尚未經過真正的排程執行）；決策 18 改為維持現況，不需要實作 |
 | 10 | FAQ_web：AI 助理寫工作筆記（決策 19）、助理記憶與查看編修頁面（決策 20） | 決策 20 完成（2026-11-25，FAQ_web 尚未 commit）；決策 19 未開始，`kb_note` 已完成所以可以接了 |
 | 11 | 本機 plugin 的 `note_log`（決策 22） | 完成（2026-11-25），有單元測試，並以 plugin 的啟動方式實際寫入真實資料表 1 筆測試資料（`note#2`）。尚未發版：分支未合併到 `main`，plugin 版號仍是 3.13.0。FAQ_web 的 `KB_WRITE_TOOLS` 還沒加上 `note_log` |
+| 12 | 工作筆記寫入流程調整（決策 23） | 程式完成（2026-11-25），有單元測試，並實際連線以 `kb_search` 帶 `note` 寫入 1 筆測試資料（`note#5`，走的是補丁套用前的相容寫法）。待辦：資料表補丁（種類加 `process`）要請子平或 DBA 執行；還沒有用真正的 AI 用戶端重新驗證漏寫是否改善 |
 
 ## 7. 已知限制與尚未驗證
 
@@ -237,6 +241,7 @@ py -3 servers/KB_ONLINE/run_server.py
 - **來源（ORIGIN）目前一律是真人對話**：排程與網站接上時要加上辨識方式。
 - **工作筆記（2026-11-25）**：`USAGE_LOG_ID` 沒有回填（見第 5 節）；沒有重複檢查、沒有擋客戶資料；`HRMS_MEMORY_NOTE` 的 `note#1`（線上版）與 `note#2`（本機 plugin）是實際寫入測試留下的測試資料，主題都標明【測試】，MCP 帳號不能刪，要請人清掉或由審核設為不採用。AI 會不會照提醒去寫筆記，還沒有用真正的 AI 用戶端驗證過；來源（ORIGIN）也只測過 `chat`。試用中的伺服器（連接埠 8780）要重啟才會有 `kb_note`。
 - **本機 `note_log`（2026-11-25，決策 22）**：尚未發版，工程師實際使用的 plugin 還沒有這個工具。`ORIGIN` 一律 `chat`：排程是用 `MEMORY_USER` 的排程專用值標示身分，但那個值沒有固定寫法，不能拿來可靠地判斷，所以排程若寫筆記也會記成 `chat`（只能從 `CREATED_BY` 分辨）。FAQ_web 的 AI 助理會把寫入類工具從可用清單移除（`C:\D\FAQ_web\server\services\agent_service.py` 的 `KB_WRITE_TOOLS`），`note_log` 還沒加進去；plugin 更新後若沒加，AI 助理會在決策 19 定案前就拿到這個寫入工具。
+- **工作筆記寫入流程調整（2026-11-25，決策 23）**：資料表補丁尚未套用。連線的查詢次數與筆記數只存在伺服器記憶體，重啟歸零，而且是依連線編號計算，同一個對話若重新連線會從頭算。動作觸發的規則會讓筆記變多、品質變雜（含沒有結論的過程），審核 agent 要能處理；「讀過 Jira 單就寫」也讓筆記更容易帶到客戶資料，仍然只靠說明要求不要寫。本機 plugin 沒有在 `recall` 加 `note`：FAQ_web 的 AI 助理是靠工具名稱清單（`KB_WRITE_TOOLS`）移除寫入工具，查詢工具若能順手寫入，助理就多了一條擋不掉的寫入路徑；線上版的 `kb_search` 有 `note`，之後 FAQ_web 若接線上版也要注意這一點。本機查詢工具的回傳現在會附提醒（9 個查詢工具的內容沒變，只在結尾多一段），FAQ_web 的 AI 助理若用同一個本機伺服器也會看到這段提醒。稽核查詢只涵蓋線上版。
 - **Codex 是否支援這種 HTTP 連線與之後的登入流程，尚未查證**。
 - **還沒有用真正的 AI 用戶端（Claude Code 等）接上來跑過**：目前的連線測試是用程式直接呼叫工具。AI 會不會照常駐說明先取 skill、處理完會不會做寫回判斷，要實際接上才知道。
 
@@ -274,3 +279,4 @@ py -3 servers/KB_ONLINE/run_server.py
 | 2026-11-25 | 決策 21 實作：排程腳本 `run_jira_auto_log.py` 的取單條件改成最近 7 天曾經是 CS CONFIRM，加 `--dry-run`。決策 18 的前提更正：腳本自 2026-10-29 起已永久排除略過清單的單，待重新確認 |
 | 2026-11-25 | 決策 18 改為維持現況：略過清單裡的單不再分析（腳本自 2026-10-29 起的行為），不實作「有更新才重跑」 |
 | 2026-11-25 | 新增決策 22 並實作：本機 `ehrms-memory` 新增 `note_log` 寫工作筆記（`servers/MEMORY/note_core.py`）；`context.md`「寫回」與 `crisis-triage` 第 6 步加上工作筆記規則；線上對照表改成 `note_log` → `kb_note`。實際寫入第 2 筆測試資料 `note#2`。尚未發版 |
+| 2026-11-25 | 新增決策 23 並實作：工作筆記改成動作觸發、獨立成段並排在最前面；`kb_note`／`note_log` 只剩主題與內容必填，新增種類 `process`；`kb_search` 加 `note` 順手寫；查詢結果的提醒改成帶次數；建表語法加種類補丁（尚未套用）與稽核查詢。實際連線寫入測試資料 `note#5` |

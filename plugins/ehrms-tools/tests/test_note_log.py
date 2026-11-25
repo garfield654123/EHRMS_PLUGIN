@@ -17,6 +17,7 @@ import note_core as nc  # noqa: E402
 import server  # noqa: E402
 
 REAL_CREATED_BY = memory_db.created_by
+REAL_INSERT = nc._insert
 
 
 class FakeCursor:
@@ -92,7 +93,7 @@ class NoteLogTests(NoteLogBase):
 
     def test_validation(self):
         cases = [
-            ({"kind": "System"}, "kind 只能是"), ({"kind": ""}, "kind 只能是"),
+            ({"kind": "System"}, "kind 只能是"),
             ({"topic": ""}, "必填"), ({"content": "  "}, "必填"),
             ({"topic": "題" * 101}, "topic 超過 100 字"), ({"content": "字" * 4001}, "content 超過 4000 字"),
             ({"evidence": "據" * 2001}, "evidence 超過 2000 字"), ({"keywords": "鍵" * 301}, "keywords 超過 300 字"),
@@ -149,7 +150,7 @@ class NoteSqlTests(unittest.TestCase):
                 mock.patch.object(memory_db, "bump_hits"), \
                 mock.patch.object(nc, "_insert", return_value=5), \
                 mock.patch.object(nc.db, "created_by", return_value="ziping.zhou"):
-            nc.log_note("finding", "特休時數不足的判斷：筆記獨有", "特休時數不足 筆記獨有字樣甲乙丙丁", keywords="特休,時數不足")
+            nc.log_note("特休時數不足的判斷：筆記獨有", "特休時數不足 筆記獨有字樣甲乙丙丁", keywords="特休,時數不足")
             found = memory_core.recall("特休時數不足 筆記獨有字樣甲乙丙丁")
         self.assertIn("特休產生批次", found)
         self.assertNotIn("甲乙丙丁", found.split("\n", 1)[1])     # 第一行是查詢敘述本身
@@ -159,11 +160,12 @@ class NoteSqlTests(unittest.TestCase):
 class ServerWiringTests(unittest.TestCase):
     def test_tool_is_listed_with_guidance(self):
         tool = {t.name: t for t in asyncio.run(server.list_tools())}["note_log"]
-        for token in ("知識庫以外", "讀程式碼", "糾正", "不用寫", "remember 或 jira_log", "不要寫客戶的實際資料",
-                      "不是正式記憶", "不需要等結論確認"):
+        for token in ("不需要確認", "對錯不論", "審核", "讀過程式碼", "查過資料表結構", "讀過 Jira 單", "糾正",
+                      "不用判斷有沒有結論", "查到就當場寫", "唯一不用寫", "remember 與 jira_log", "不要寫客戶的實際資料",
+                      "不是正式記憶"):
             self.assertIn(token, tool.description)
-        self.assertEqual(tool.inputSchema["required"], ["kind", "topic", "content"])
-        self.assertEqual(tool.inputSchema["properties"]["kind"]["enum"], ["finding", "correction"])
+        self.assertEqual(tool.inputSchema["required"], ["topic", "content"])
+        self.assertEqual(tool.inputSchema["properties"]["kind"]["enum"], ["process", "finding", "correction"])
         self.assertEqual(set(tool.inputSchema["properties"]),
                          {"kind", "topic", "content", "evidence", "keywords", "entry_path", "entry_method", "ref_key"})
 
@@ -172,21 +174,88 @@ class ServerWiringTests(unittest.TestCase):
             out = asyncio.run(server.call_tool("note_log", {
                 "kind": "correction", "topic": "t", "content": "c", "evidence": "e", "ref_key": "EHRMSONE-1"}))
         self.assertEqual(out, [{"type": "text", "text": "ok"}])
-        log.assert_called_once_with("correction", "t", "c", evidence="e", keywords="", entry_path="",
+        log.assert_called_once_with("t", "c", kind="correction", evidence="e", keywords="", entry_path="",
                                     entry_method="", ref_key="EHRMSONE-1")
 
     def test_missing_required_arguments_are_rejected_not_crashing(self):
         with mock.patch.object(nc, "_insert", side_effect=AssertionError("不該寫入")):
             out = asyncio.run(server.call_tool("note_log", {"kind": "finding"}))
+            self.assertNotIn("工作筆記", out[0]["text"])            # 寫入工具的回傳不附查詢提醒
         self.assertIn("必填", out[0]["text"])
 
     def test_context_and_skill_tell_the_ai_to_write_notes(self):
         context = (ROOT / "context.md").read_text(encoding="utf-8")
         skill = (ROOT / "skills" / "crisis-triage" / "SKILL.md").read_text(encoding="utf-8")
         for text in (context, skill):
-            for token in ("note_log", "工作筆記", "已確認", "例外", "kind=", "correction"):
+            for token in ("note_log", "工作筆記", "一定要做", "不需", "對錯不論", "當場寫", "correction"):
                 self.assertIn(token, text)
+        # 工作筆記獨立成段、排在正式知識之前；「已確認才寫」只留在正式知識那一段
+        self.assertLess(context.index("## 工作筆記（一定要做）"), context.index("## 寫回正式知識（確認後才寫）"))
+        note_part = context[context.index("## 工作筆記"):context.index("## 寫回正式知識")]
+        for token in ("讀過程式碼", "查過資料表結構", "讀過 Jira 單", "糾正"):
+            self.assertIn(token, note_part)
+        self.assertNotIn("remember", note_part)
         self.assertIn("正式知識（以下各項）只記錄**已確認**的結論", context)
+
+
+class ProcessAndReminderTests(NoteLogBase):
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.dict(nc._activity, {"lookups": 0, "notes": 0})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_kind_defaults_to_process(self):
+        text = nc.log_note("EHRMSONE-35010 排查過程", "讀了 Leave.cls，還沒看出原因，卡在結轉設定。")
+        self.assertIn("過程紀錄", text)
+        self.assertEqual((self.rows[0]["NOTE_KIND"], self.rows[0]["EVIDENCE"]), ("process", None))
+
+    def test_process_falls_back_to_marked_finding_until_the_patch_is_applied(self):
+        calls = []
+
+        def execute(row):
+            calls.append(row)
+            if len(calls) == 1:
+                raise RuntimeError('conflicted with the CHECK constraint "CK_HRMSMEMNOTE_KIND"')
+            return 77
+        with mock.patch.object(nc, "_insert", side_effect=REAL_INSERT), \
+                mock.patch.object(nc, "_execute", side_effect=execute):
+            text = nc.log_note("排查過程", "查了 A，卡在 B")
+        self.assertIn("note#77", text)
+        self.assertEqual([(c["NOTE_KIND"], c["CONTENT"]) for c in calls],
+                         [("process", "查了 A，卡在 B"), ("finding", "〔過程紀錄〕查了 A，卡在 B")])
+
+    def test_other_insert_errors_are_not_retried(self):
+        execute = mock.Mock(side_effect=RuntimeError("connection lost"))
+        with mock.patch.object(nc, "_insert", side_effect=REAL_INSERT), mock.patch.object(nc, "_execute", execute):
+            self.assertIn("工作筆記寫入失敗", nc.log_note("排查過程", "查了 A"))
+        self.assertEqual(execute.call_count, 1)
+
+    def test_lookup_results_end_with_counts(self):
+        with mock.patch.object(server.mc, "recall", return_value="# 記憶檢索"), \
+                mock.patch.object(server.wc, "lookup", return_value="# Wiki"):
+            first = asyncio.run(server.call_tool("recall", {"question": "特休"}))[0]["text"]
+            self.assertTrue(first.startswith("# 記憶檢索\n\n"))
+            self.assertIn("這次對話已查詢 1 次，尚未寫工作筆記", first)
+            for token in ("note_log", "不需確認", "對錯不論", "只查知識庫的不用寫"):
+                self.assertIn(token, first)
+            asyncio.run(server.call_tool("note_log", {"topic": "t", "content": "c"}))
+            second = asyncio.run(server.call_tool("wiki_lookup", {"query": "特休"}))[0]["text"]
+        self.assertIn("已查詢 2 次、已寫 1 筆工作筆記", second)
+        self.assertNotIn("尚未寫", second)
+
+    def test_failed_lookup_and_failed_note_are_not_counted(self):
+        with mock.patch.object(server.mc, "recall", return_value="⚠️ 記憶 DB 連線失敗：x"):
+            out = asyncio.run(server.call_tool("recall", {"question": "特休"}))[0]["text"]
+        self.assertEqual(out, "⚠️ 記憶 DB 連線失敗：x")
+        asyncio.run(server.call_tool("note_log", {"topic": "", "content": "c"}))
+        self.assertEqual(nc._activity, {"lookups": 0, "notes": 0})
+
+    def test_write_tools_do_not_get_the_reminder(self):
+        with mock.patch.object(server.mc, "remember", return_value="✅ 已記住"):
+            out = asyncio.run(server.call_tool("remember", {"kind": "System", "topic": "t", "content": "c"}))
+        self.assertEqual(out[0]["text"], "✅ 已記住")
+        self.assertFalse({"note_log", "remember", "jira_log", "faq_log", "sop_log", "task_log"} & set(server.LOOKUP_TOOLS))
 
 
 if __name__ == "__main__":

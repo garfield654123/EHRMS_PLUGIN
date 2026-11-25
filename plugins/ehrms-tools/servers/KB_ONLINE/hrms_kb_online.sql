@@ -251,7 +251,8 @@ CREATE TABLE dbo.HRMS_MEMORY_NOTE (
     NOTE_KIND        VARCHAR(20)    NOT NULL
         CONSTRAINT CK_HRMSMEMNOTE_KIND CHECK (NOTE_KIND IN
             ('finding',      -- 知識庫以外查出來的新結論（看程式碼等）
-             'correction')), -- 使用者對 AI 的修正
+             'correction',   -- 使用者對 AI 的修正
+             'process')),    -- 過程紀錄：做了什麼、查到什麼、卡在哪（2026-11-25 加，既有的表用下面的補丁）
     TOPIC            NVARCHAR(100)  NOT NULL,   -- 主題
     CONTENT          NVARCHAR(4000) NOT NULL,   -- 結論
     EVIDENCE         NVARCHAR(2000) NULL,       -- 依據：程式位置、使用者的原話
@@ -288,6 +289,52 @@ CREATE INDEX IX_HRMSMEMNOTE_REF    ON dbo.HRMS_MEMORY_NOTE (REF_KEY)
     WHERE REF_KEY IS NOT NULL;
 END
 GO
+
+------------------------------------------------------------------
+-- 補丁（2026-11-25）：工作筆記的種類多一個值 process（過程紀錄，SPEC 決策 23）
+-- 過程紀錄＝做了什麼、查到什麼、卡在哪，沒有結論也能寫；是 kb_note／note_log 沒給種類時的預設值。
+-- ★ 尚未套用。套用前伺服器會把過程紀錄改存成 finding、內容最前面加上「〔過程紀錄〕」，功能不受影響；
+--   套用後才會存成 process。重複執行也安全。
+------------------------------------------------------------------
+IF EXISTS (SELECT 1 FROM sys.check_constraints
+           WHERE name = N'CK_HRMSMEMNOTE_KIND' AND definition NOT LIKE N'%process%')
+BEGIN
+    ALTER TABLE dbo.HRMS_MEMORY_NOTE DROP CONSTRAINT CK_HRMSMEMNOTE_KIND;
+    ALTER TABLE dbo.HRMS_MEMORY_NOTE ADD CONSTRAINT CK_HRMSMEMNOTE_KIND
+        CHECK (NOTE_KIND IN ('finding','correction','process'));
+END
+GO
+
+------------------------------------------------------------------
+-- 稽核查詢（只讀，SPEC 決策 23）：有查詢卻沒有寫工作筆記的連線
+-- 寫過筆記＝呼叫過 kb_note，或 kb_search 帶 note（兩者的 WRITE_REF 都是 note#編號）。
+-- 只查了知識庫、沒做其他事的連線本來就不用寫，所以這個比例只能看趨勢，不能當成漏寫率。
+-- 本機 plugin（ehrms-memory）沒有使用紀錄，不在這裡面。
+------------------------------------------------------------------
+/*
+-- ① 逐一連線：查詢次數、筆記數
+SELECT  SESSION_ID, MIN(USER_NAME) AS USER_NAME, MIN(CLIENT_NAME) AS CLIENT_NAME,
+        MIN(EVENT_TIME) AS FIRST_CALL, MAX(EVENT_TIME) AS LAST_CALL,
+        SUM(CASE WHEN TOOL_NAME IN ('kb_search','kb_get') THEN 1 ELSE 0 END) AS LOOKUPS,
+        SUM(CASE WHEN WRITE_REF LIKE 'note#%' THEN 1 ELSE 0 END)             AS NOTES,
+        MAX(JIRA_KEY) AS JIRA_KEY
+FROM    dbo.HRMS_KB_USAGE_LOG
+WHERE   EVENT_TIME >= DATEADD(DAY, -30, SYSDATETIME())
+GROUP BY SESSION_ID
+HAVING  SUM(CASE WHEN TOOL_NAME IN ('kb_search','kb_get') THEN 1 ELSE 0 END) > 0
+ORDER BY NOTES, LOOKUPS DESC;
+
+-- ② 依使用者：有查詢的連線數、其中沒寫筆記的連線數
+SELECT  USER_NAME, COUNT(*) AS SESSIONS, SUM(CASE WHEN NOTES = 0 THEN 1 ELSE 0 END) AS SESSIONS_WITHOUT_NOTE
+FROM   (SELECT SESSION_ID, MIN(USER_NAME) AS USER_NAME,
+               SUM(CASE WHEN WRITE_REF LIKE 'note#%' THEN 1 ELSE 0 END) AS NOTES
+        FROM   dbo.HRMS_KB_USAGE_LOG
+        WHERE  EVENT_TIME >= DATEADD(DAY, -30, SYSDATETIME())
+        GROUP BY SESSION_ID
+        HAVING SUM(CASE WHEN TOOL_NAME IN ('kb_search','kb_get') THEN 1 ELSE 0 END) > 0) s
+GROUP BY USER_NAME
+ORDER BY SESSIONS_WITHOUT_NOTE DESC;
+*/
 
 ------------------------------------------------------------------
 -- 權限（★ 執行前把帳號換成實際的 database user）
