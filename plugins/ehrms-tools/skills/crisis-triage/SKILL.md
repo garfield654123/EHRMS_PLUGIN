@@ -91,4 +91,5 @@ description: EHRMS Jira 維運單（Crisis 單）需求分析與處理分流。�
   2. **可泛化知識** → 跨單通用的系統行為或程式入口才用 `remember`（System/Engineer 兩型；訂正帶 `supersedes=舊ID`）
   3. **補齊參考資料**（查無才寫，`refs` 必填）：可直接回覆客戶的問答 → `faq_log`；同類客戶需求的處理步驟已確認 → `sop_log`；已在客戶端實際用某段 SQL 修正並確認無誤 → 先完成 1. 的 `jira_log`，再 `task_log`。人工資料不可修改，有出入時在回覆中提出
   - 有寫入時，在輸出中列出新增或更新的 ID
+  - **工作筆記**（上述「已確認才記錄」的例外）：追碼等知識庫以外得到的結論，即使尚未確認、不能寫 `jira_log`／`remember`，也要用 `note_log(kind="finding", topic, content, evidence=程式位置, entry_path, ref_key=單號)` 留下來；使用者糾正你的說法用 `kind="correction"`。結論都來自知識庫查詢結果、或已寫入 `jira_log`／`remember` 的不用寫
 - 查單／分析完成不自動改碼、執行資料更新或送出 Jira 評論；承接使用者既有授權，需要新增授權時才確認具體方案。

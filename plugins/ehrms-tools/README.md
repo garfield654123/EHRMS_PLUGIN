@@ -407,6 +407,7 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 |------|------|
 | `recall` | 檢索記憶，System/Engineer 分組回傳；命中自動累計引用次數。查案流程第一步呼叫 |
 | `remember` | 寫入記憶（唯一寫入口，內建去重）；`supersedes=舊ID` 完成訂正。結論確認後呼叫 |
+| `note_log` | 寫工作筆記（HRMS_MEMORY_NOTE）：知識庫以外查出來的新結論（讀程式碼等）與使用者的修正，不必等結論確認。只新增、不查重，查詢工具查不到；審核後才升級成記憶 |
 | `jira_lookup` | 查結案紀錄：給單號 → 精確查該單；給問題敘述 → 相似案件檢索（✅已審核案例優先，⏳未審核僅供參考）。查案開頭與 recall 並行 |
 | `jira_log` | 寫入結案紀錄（單號/單型/根因/解法/修改程式）；同單重複會擋下，修正結論帶 `supersedes=舊ID`。Crisis=維運單、Story=改程式與 bug fix（changed_files 必填）。新紀錄一律 ⏳未審核 |
 

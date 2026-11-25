@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """EHRMS memory MCP server（stdio）——團隊共用記憶＋Jira 結案紀錄＋人工維護參考資料
 ① recall / remember：跨單可泛化知識（HRMS_MEMORY）
+   note_log：工作筆記（HRMS_MEMORY_NOTE），知識庫以外的新結論與使用者的修正；只新增，查詢工具查不到
 ② jira_lookup / jira_log：單一案件結案紀錄（HRMS_JIRA，一單一筆有效紀錄）
 ③ faq_lookup / bulletin_lookup / task_lookup / sop_lookup：人工維護為主的參考資料
    （HRMS_FAQ／HRMS_FAQ_BULLETIN／HRMS_TASK／HRMS_FAQ_SOP，直接查原表）
@@ -20,6 +21,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool
 
 import memory_core as mc
+import note_core as nc
 import jira_core as jc
 import refdata_core as rc
 import refdata_write as rw
@@ -93,6 +95,40 @@ async def list_tools() -> list[Tool]:
                     "source": {"type": "string", "description": "產生途徑：skill 名稱或 'curate'（可選）"},
                     "supersedes": {"type": "string", "description": "要取代的舊記憶 ID（訂正/歸納用；逗號分隔可多筆）"},
                     "force": {"type": "boolean", "description": "跳過去重檢查（確認為新議題時用）"},
+                },
+                "required": ["kind", "topic", "content"],
+            },
+        ),
+        Tool(
+            name="note_log",
+            description=(
+                "寫一筆工作筆記（HRMS_MEMORY_NOTE）：把這次處理中「知識庫以外」得到的結論留下來，"
+                "不需要等結論確認，也不需要先問使用者。\n"
+                "什麼時候要寫：① 查問題過程中另外查出來的新結論，特別是讀程式碼追出來的，"
+                "也包含查資料表結構、實際測試得到的（kind=finding）；"
+                "② 使用者糾正了你的說法或補充了你不知道的事（kind=correction）。回覆使用者之前寫，一個結論一筆。\n"
+                "什麼不用寫：結論完全來自知識庫查詢結果的（recall、wiki_lookup、jira_lookup、faq_lookup 等查到的，"
+                "知識庫裡本來就有）；已經用 remember 或 jira_log 寫入的；沒有新結論時不用寫，也不必向使用者說明。\n"
+                "content 寫結論本身（是什麼、在什麼條件下成立），evidence 寫依據：finding 寫程式位置或查證方式，"
+                "correction 寫使用者的原話。不要寫客戶的實際資料（公司名稱、統編、員工姓名、帳號、薪資等），"
+                "改用一般化的描述。\n"
+                "工作筆記不是正式記憶，recall 等查詢工具查不到；之後審核確認正確才會升級成團隊記憶。"
+                "已確認且跨單可通用的結論仍用 remember，案件的結案紀錄仍用 jira_log。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["finding", "correction"],
+                             "description": "finding=知識庫以外查出來的新結論 / correction=使用者對 AI 的修正"},
+                    "topic": {"type": "string", "description": "主題短標題（100 字內）"},
+                    "content": {"type": "string", "description": "結論（4000 字內）"},
+                    "evidence": {"type": "string",
+                                 "description": "依據：程式位置、查證方式，或使用者的原話（2000 字內）；盡量填"},
+                    "keywords": {"type": "string", "description": "關鍵字，逗號分隔（可選）"},
+                    "entry_path": {"type": "string",
+                                   "description": "程式入口的 repo 相對路徑，如 VB/EHRMS/xx.cls；讀程式碼得到的結論才填"},
+                    "entry_method": {"type": "string", "description": "入口函式（可選）"},
+                    "ref_key": {"type": "string", "description": "這次處理的 Jira 單號，如 EHRMSONE-32543；有對應的單才填"},
                 },
                 "required": ["kind", "topic", "content"],
             },
@@ -410,6 +446,14 @@ async def call_tool(name: str, arguments: dict) -> list[dict]:
             source=arguments.get("source", ""),
             supersedes=arguments.get("supersedes", ""),
             force=bool(arguments.get("force", False))))
+    if name == "note_log":
+        return _text(nc.log_note(
+            arguments.get("kind", ""), arguments.get("topic", ""), arguments.get("content", ""),
+            evidence=arguments.get("evidence", ""),
+            keywords=arguments.get("keywords", ""),
+            entry_path=arguments.get("entry_path", ""),
+            entry_method=arguments.get("entry_method", ""),
+            ref_key=arguments.get("ref_key", "")))
     if name == "jira_lookup":
         return _text(jc.lookup(
             arguments["query"], arguments.get("kind"), arguments.get("top_k", 5)))
