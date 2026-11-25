@@ -218,7 +218,7 @@ class GetTests(QueryBase):
         with mock.patch.object(tq.cc, "lookup", return_value="客製查詢結果") as lookup:
             text = await self.d.call(CTX, "kb_get", {"type": "custom", "id": "23019591", "section": "Leave"})
         lookup.assert_called_once_with("23019591", "Leave")
-        self.assertEqual(text, "客製查詢結果")
+        self.assertEqual(text, "客製查詢結果\n\n" + tq.NOTE_REMINDER)   # 內容原樣回傳，最後只多一行工作筆記提醒
 
 
 if __name__ == "__main__":

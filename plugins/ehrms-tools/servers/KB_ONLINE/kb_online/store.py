@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""線上知識庫 MCP 的資料層：使用者對應（HRMS_KB_USER_BINDING）與使用紀錄（HRMS_KB_USAGE_LOG）
+"""線上知識庫 MCP 的資料層：使用者對應（HRMS_KB_USER_BINDING）、使用紀錄（HRMS_KB_USAGE_LOG）、
+候選（HRMS_KB_CANDIDATE）、疑慮標記（HRMS_KB_FLAG）與工作筆記（HRMS_MEMORY_NOTE）
 
 兩種實作，介面相同：
 - MssqlStore ：正式環境，表由 hrms_kb_online.sql 建立；只發 SELECT 與 INSERT
@@ -30,6 +31,11 @@ CANDIDATE_COLUMNS = ("MEM_TYPE", "PURPOSE", "TOPIC", "CONTENT", "KEYWORDS", "FUN
                      "ENTRY_METHOD", "REF_KEY", "SOURCE", "CREATED_BY", "CONFLICT_MEMORY_ID", "SIMILARITY")
 FLAG_COLUMNS = ("TARGET_TYPE", "TARGET_ID", "REASON", "EVIDENCE", "JIRA_KEY", "FLAG_SOURCE",
                 "CANDIDATE_ID", "CREATED_BY")
+# 工作筆記（HRMS_MEMORY_NOTE）：處理結果欄位（STATUS 等）不寫，用資料表的預設值；
+# USAGE_LOG_ID 也不寫——使用紀錄在工具執行完才產生，回填需要 UPDATE，而這裡只發 SELECT 與 INSERT。
+# 要對回使用紀錄，用使用紀錄的 WRITE_REF（note#編號）或兩邊的 SESSION_ID。
+NOTE_COLUMNS = ("NOTE_KIND", "TOPIC", "CONTENT", "EVIDENCE", "KEYWORDS", "ENTRY_PATH", "ENTRY_METHOD",
+                "REF_KEY", "ORIGIN", "SESSION_ID", "CREATED_BY")
 
 
 def _insert_sql(columns):
@@ -37,6 +43,7 @@ def _insert_sql(columns):
 
 
 _CANDIDATE_INSERT, _FLAG_INSERT = _insert_sql(CANDIDATE_COLUMNS), _insert_sql(FLAG_COLUMNS)
+_NOTE_INSERT = _insert_sql(NOTE_COLUMNS)
 
 
 def _candidate_values(c):
@@ -45,6 +52,10 @@ def _candidate_values(c):
 
 def _flag_values(f):
     return [f.get(col) for col in FLAG_COLUMNS]
+
+
+def _note_values(n):
+    return [n.get(col) for col in NOTE_COLUMNS]
 
 
 class SqliteStore:
@@ -78,6 +89,13 @@ class SqliteStore:
                 REF_KEY TEXT, SOURCE TEXT, CREATED_BY TEXT NOT NULL,
                 CREATED_AT TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 CONFLICT_MEMORY_ID INTEGER NOT NULL, SIMILARITY REAL, USAGE_LOG_ID INTEGER,
+                STATUS TEXT NOT NULL DEFAULT 'open', RESOLVED_BY TEXT, RESOLVED_AT TEXT,
+                RESULT_MEMORY_ID INTEGER, RESOLVE_NOTE TEXT);
+            CREATE TABLE IF NOT EXISTS HRMS_MEMORY_NOTE (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT, NOTE_KIND TEXT NOT NULL, TOPIC TEXT NOT NULL,
+                CONTENT TEXT NOT NULL, EVIDENCE TEXT, KEYWORDS TEXT, ENTRY_PATH TEXT, ENTRY_METHOD TEXT,
+                REF_KEY TEXT, ORIGIN TEXT NOT NULL, SESSION_ID TEXT, USAGE_LOG_ID INTEGER,
+                CREATED_BY TEXT NOT NULL, CREATED_AT TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 STATUS TEXT NOT NULL DEFAULT 'open', RESOLVED_BY TEXT, RESOLVED_AT TEXT,
                 RESULT_MEMORY_ID INTEGER, RESOLVE_NOTE TEXT);
         """)
@@ -114,6 +132,13 @@ class SqliteStore:
         """存一筆疑慮標記，回傳編號。f 的鍵見 FLAG_COLUMNS。"""
         with self._lock:
             cur = self._conn.execute(_FLAG_INSERT.format(table="HRMS_KB_FLAG"), _flag_values(f))
+            self._conn.commit()
+            return cur.lastrowid
+
+    def add_note(self, n):
+        """存一筆工作筆記，回傳編號。n 的鍵見 NOTE_COLUMNS。工作筆記只新增，這一層沒有讀取它的方法。"""
+        with self._lock:
+            cur = self._conn.execute(_NOTE_INSERT.format(table="HRMS_MEMORY_NOTE"), _note_values(n))
             self._conn.commit()
             return cur.lastrowid
 
@@ -196,6 +221,10 @@ class MssqlStore:
     def add_flag(self, f):
         with self._lock:
             return self._insert_returning_id(_FLAG_INSERT.format(table="dbo.HRMS_KB_FLAG"), _flag_values(f))
+
+    def add_note(self, n):
+        with self._lock:
+            return self._insert_returning_id(_NOTE_INSERT.format(table="dbo.HRMS_MEMORY_NOTE"), _note_values(n))
 
     def open_flags(self):
         with self._lock:

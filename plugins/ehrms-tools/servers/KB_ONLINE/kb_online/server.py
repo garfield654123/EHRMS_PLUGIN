@@ -31,6 +31,7 @@ from .store import make_store
 from .tools_core import registry
 from . import tools_query  # noqa: F401  匯入即註冊 kb_search、kb_get
 from . import tools_write  # noqa: F401  匯入即註冊 remember、kb_flag
+from . import tools_note  # noqa: F401  匯入即註冊 kb_note
 from . import tools_skill  # 匯入即註冊 skill_list、skill_get
 from . import tools_contribute  # noqa: F401  匯入即註冊 kb_contribute
 from .usage_log import UsageLogger
@@ -66,6 +67,11 @@ Jira 結案紀錄、公告。每次工具呼叫都會留下使用紀錄（使用
   更新既有內容時帶 updates：會新增一筆更新版，舊的保留並標示已有更新版本。
 - 沒有 → 在回覆最後用一句話說明為什麼這次沒有寫入（例如：已有相同記憶、結論尚未確認、只是個案資料調整）。
 只寫已確認的結論，不寫推測，也不寫客戶的實際資料（公司、員工、帳號）。寫入或標記後，在回覆中列出編號。
+
+## 工作筆記（kb_note）
+處理中有「知識庫以外」得到的結論，不必等確認，回覆前用 kb_note 記下來：另外查出來的新結論（例如看程式碼得到的，
+kind=finding）、使用者對你的修正（kind=correction）。結論完全來自知識庫查詢結果、或已用 remember 寫入的不用寫；
+沒有就不必說明。工作筆記不是正式記憶、查詢查不到，審核通過才會升級；同樣不寫客戶的實際資料。
 
 ## 限制
 - 公司資料庫沒有客戶資料；需要客戶資料佐證時，提供查詢語法請客戶端或顧問執行。

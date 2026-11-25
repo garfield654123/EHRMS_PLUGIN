@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """骨架階段的兩個工具：確認身分、查看服務狀態
 
-知識查詢（kb_search／kb_get）、寫入（remember）、疑慮標記（kb_flag）、skill（skill_list／skill_get）
+知識查詢（kb_search／kb_get）、寫入（remember）、疑慮標記（kb_flag）、工作筆記（kb_note）、skill（skill_list／skill_get）
 之後各自加在自己的模組，用同一個 registry 註冊。
 """
 from .dispatch import Registry, ToolResult

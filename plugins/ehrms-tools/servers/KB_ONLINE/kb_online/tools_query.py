@@ -59,6 +59,9 @@ def _ai_tag(author):
 
 
 PURPOSE_LABELS = {"reply": "可回覆客戶", "procedure": "處理步驟", "data_fix": "資料修正語法", "general": "一般知識"}
+# 決策 17：漏寫工作筆記的補法是把提醒放進查詢結果，只接網址、沒裝 plugin 的同事也看得到
+NOTE_REMINDER = ("→ 處理完若有知識庫以外的新結論（例如看程式碼查到的）或使用者的修正，"
+                 "請用 kb_note 寫工作筆記；結論都來自知識庫就不用寫。")
 DATA_FIX_NOTE = "⚠️ 這筆含修正資料的語法，僅供參考：須人工確認參數與影響範圍後才可執行，AI 不可自動執行。"
 
 
@@ -215,6 +218,7 @@ def _search_sync(store, query, sources, top_k, customer_code, with_version):
         lines.append("\n→ 以上只是摘要。要引用前請用 kb_get(type, id) 讀全文；Wiki 可加 section（規則編號如 R7、章節名、全文）。")
         if any(r["type"] == "task" for r in refs):
             lines.append("→ Task 的 SQL 只是範本，須人工確認參數與影響範圍，不可自動執行。")
+    lines.append(("" if refs else "\n") + NOTE_REMINDER)     # 查無資料時更可能另外去查，一樣提醒
     return ToolResult("\n".join(lines), refs=refs, no_result=not refs, query_text=query,
                       error=("；".join(failed) or None) if failed else None)
 
@@ -342,6 +346,7 @@ def _get_sync(store, kind, rid, section, customer_code):
     reasons = _flag_notes(store).get((kind, str(found_id)), [])
     if reasons:
         text += "\n\n⚠ 這筆知識有待處理的疑慮：\n" + "\n".join(f"- {r}" for r in reasons)
+    text += "\n\n" + NOTE_REMINDER
     return ToolResult(text, refs=[{"type": kind, "id": found_id, "score": None}], no_result=False)
 
 
