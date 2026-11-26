@@ -1,6 +1,6 @@
 ---
 name: jira-goal-watch
-description: 僅供本機排程（Windows Task Scheduler，每天 02:00）headless 呼叫 `claude -p "/ehrms-tools:jira-goal-watch"`，或使用者明確指名要求執行本 skill 時使用；不可因為使用者只是泛泛提到「檢查我的 jira 單」「review 未處理的單」就自動判斷要套用本 skill。複查 EHRMSONE 專案中 ziping.zhou 名下未處理的單：issuetype=Story 走「bug 單進度報告」分支，issuetype=Crisis 走「維運問題判斷」分支（快篩＋追碼＋備妥客戶端查詢語法），判斷後直接在該單加一則內部留言。全程不可詢問使用者，目前 Jira MCP 只有 add_comment 可用，不支援更新狀態/transition。
+description: 僅供本機排程（Windows Task Scheduler，每天 02:00）headless 呼叫 `claude -p "/ehrms-tools:jira-goal-watch"`，或使用者明確指名要求執行本 skill 時使用；不可因為使用者只是泛泛提到「檢查我的 jira 單」「review 未處理的單」就自動判斷要套用本 skill。複查 EHRMSONE 專案中 ziping.zhou 名下未處理的單：issuetype=Story 走「bug 單進度報告」分支，issuetype=Crisis 走「維運問題判斷」分支（快篩＋追碼＋備妥客戶端查詢語法），判斷後直接在該單加一則內部留言。全程不可詢問使用者，寫入只用 add_comment；Jira MCP 的改欄位、改狀態、押工時工具都需要使用者確認，本 skill 不使用。
 ---
 
 # Jira Goal Watch — 下班後未處理單複查批次
@@ -18,7 +18,7 @@ description: 僅供本機排程（Windows Task Scheduler，每天 02:00）headle
 
 - **headless 批次流程，全程不可詢問使用者**（無人在場執行）。判斷沒有把握時，寧可略過不留言，也不可用猜測的內容留言到 Jira 上。
 - **git 指令一律用 PowerShell 工具執行**：headless 環境下 Bash 工具的 `git` 需要核准會被擋，PowerShell 版可正常執行（例如 `git log --all --grep`、`git -C C:/D/CUSTOM_GIT show`）。
-- **寫入動作僅限 `add_comment`**——目前 Jira MCP 沒有更新狀態/transition 的工具，不可嘗試用其他方式（例如硬改 summary/description）模擬狀態變更。
+- **寫入動作僅限 `add_comment`**——Jira MCP 雖有 `update_issue_fields`、`list_transitions`／`transition_issue`、`add_worklog`，但都要求先經使用者確認，本 skill 是 headless 排程、無法確認，**一律不可呼叫**；也不可用其他方式（例如硬改 summary/description）模擬狀態變更。
 - 每則自動留言**必須**以固定標記開頭：
   ```
   【AI 排程自動回覆｜依 ziping.zhou 設定的 goal 執行，如有誤請忽略並等待本人確認】

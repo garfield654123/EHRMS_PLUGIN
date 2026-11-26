@@ -262,6 +262,137 @@ async def list_tools() -> list[Tool]:
                 "required": ["issue_key", "body"]
             }
         ),
+        Tool(
+            name="update_issue_fields",
+            description=(
+                "【寫入】修改 Issue 欄位（白名單）：labels 標籤、components 元件用 add／remove 增減，"
+                "不會覆蓋既有值；assignee 指派人、duedate 到期日、summary 標題為直接設定。"
+                "沒填的欄位不動，其他欄位一律不支援。"
+                "⚠ 呼叫前必須先把「單號、要加／移除哪些標籤或元件、哪些欄位改成什麼值」列給使用者，"
+                "取得使用者明確同意後才可呼叫；不可自行決定或在使用者未確認時呼叫。"
+                "回傳修改前後的欄位值，請據以向使用者回報結果。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "issue_key": {
+                        "type": "string",
+                        "description": "Issue 的 Key，例如: PROJ-123"
+                    },
+                    "add_labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要加上的標籤（不可含空白），既有標籤保留"
+                    },
+                    "remove_labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要移除的標籤"
+                    },
+                    "add_components": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要加上的元件名稱（須是專案已有的元件）"
+                    },
+                    "remove_components": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要移除的元件名稱"
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "指派人 email 或 accountId；空字串＝取消指派。email 對到多人時會拒絕"
+                    },
+                    "duedate": {
+                        "type": "string",
+                        "description": "到期日 YYYY-MM-DD；空字串＝清空"
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "新標題（整段取代，不可空白）"
+                    }
+                },
+                "required": ["issue_key"]
+            }
+        ),
+        Tool(
+            name="list_transitions",
+            description=(
+                "列出 Issue 目前狀態與可執行的狀態流轉（transition id、名稱、目標狀態，"
+                "需填欄位者標 required_fields）。唯讀，不會改單。"
+                "改狀態的第一步：查完把「單號、目前狀態 → 目標狀態」給使用者確認，"
+                "同意後才呼叫 transition_issue。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "issue_key": {
+                        "type": "string",
+                        "description": "Issue 的 Key，例如: PROJ-123"
+                    }
+                },
+                "required": ["issue_key"]
+            }
+        ),
+        Tool(
+            name="transition_issue",
+            description=(
+                "【寫入】執行 Issue 狀態流轉。必須先呼叫 list_transitions，"
+                "並把「單號、目前狀態 → 目標狀態（transition 名稱）」列給使用者，"
+                "取得使用者明確同意後才可呼叫；不可自行決定或在使用者未確認時呼叫。"
+                "expected_status 填確認時的目前狀態，執行前會再核對，"
+                "狀態已變或 transition 已不可用時拒絕執行，須重新查詢並再次確認。"
+                "需要填欄位的 transition（required_fields）無法代填，請改在 Jira 畫面操作。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "issue_key": {
+                        "type": "string",
+                        "description": "Issue 的 Key，例如: PROJ-123"
+                    },
+                    "transition_id": {
+                        "type": "string",
+                        "description": "list_transitions 回傳的 transition id"
+                    },
+                    "expected_status": {
+                        "type": "string",
+                        "description": "使用者確認時看到的目前狀態名稱（list_transitions 的 current_status）"
+                    }
+                },
+                "required": ["issue_key", "transition_id", "expected_status"]
+            }
+        ),
+        Tool(
+            name="add_worklog",
+            description=(
+                "【寫入】對 Issue 記錄工時（worklog），記在目前 Jira 帳號名下。"
+                "⚠ 呼叫前必須先把「單號、工時、開始時間、說明」列給使用者，"
+                "取得使用者明確同意後才可呼叫；不可自行估算工時或在使用者未確認時呼叫。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "issue_key": {
+                        "type": "string",
+                        "description": "Issue 的 Key，例如: PROJ-123"
+                    },
+                    "time_spent": {
+                        "type": "string",
+                        "description": "工時，Jira 格式，例如: \"1h 30m\"、\"2h\"、\"45m\"、\"1d\""
+                    },
+                    "started": {
+                        "type": "string",
+                        "description": "開始時間 YYYY-MM-DD 或 YYYY-MM-DD HH:MM（本機時區）；只給日期＝當天 09:00；不填＝現在"
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "工時說明（純文字，選填）"
+                    }
+                },
+                "required": ["issue_key", "time_spent"]
+            }
+        ),
     ]
 
 
@@ -425,6 +556,49 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             issue_key = arguments["issue_key"]
             body = arguments["body"]
             result = await client.add_comment(issue_key, body)
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2, ensure_ascii=False)
+            )]
+
+        elif name == "update_issue_fields":
+            result = await client.update_issue_fields(
+                arguments["issue_key"],
+                add_labels=arguments.get("add_labels"),
+                remove_labels=arguments.get("remove_labels"),
+                add_components=arguments.get("add_components"),
+                remove_components=arguments.get("remove_components"),
+                assignee=arguments.get("assignee"),
+                duedate=arguments.get("duedate"),
+                summary=arguments.get("summary"))
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2, ensure_ascii=False)
+            )]
+
+        elif name == "list_transitions":
+            result = await client.list_transitions(arguments["issue_key"])
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2, ensure_ascii=False)
+            )]
+
+        elif name == "transition_issue":
+            result = await client.transition_issue(
+                arguments["issue_key"],
+                transition_id=arguments.get("transition_id", ""),
+                expected_status=arguments.get("expected_status", ""))
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2, ensure_ascii=False)
+            )]
+
+        elif name == "add_worklog":
+            result = await client.add_worklog(
+                arguments["issue_key"],
+                time_spent=arguments.get("time_spent", ""),
+                started=arguments.get("started"),
+                comment=arguments.get("comment"))
             return [TextContent(
                 type="text",
                 text=json.dumps(result, indent=2, ensure_ascii=False)

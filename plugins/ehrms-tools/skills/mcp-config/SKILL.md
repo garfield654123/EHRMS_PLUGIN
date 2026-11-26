@@ -28,7 +28,7 @@ description: 管理 Claude Code 與 Codex 的 EHRMS MCP 設定，支援 Jira、D
 - Database：echo；需要驗證資料庫時，執行 SELECT 1 AS ok。
 - Jira：不帶 username 呼叫 get_user_info；查單時只使用使用者指定且有權限的單號。
 - Memory：列舉工具確認握手；需驗證 DB 時可用 faq_lookup 查已知主題。
-- 不以 remember、jira_log、custom_log、custom_sa_log 或 add_comment 做連線測試。
+- 不以 remember、jira_log、custom_log、custom_sa_log，或 Jira 寫入工具（add_comment、update_issue_fields、transition_issue、add_worklog）做連線測試。
 - recall 會更新引用統計，不能把它當作完全唯讀的 ping。
 
 只提供數字的 Jira 單號補 EHRMSONE- 前綴；完整 key 保留使用者指定的專案。

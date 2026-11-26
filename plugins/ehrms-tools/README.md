@@ -386,6 +386,12 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 | `get_user_info` | 取得 Jira 用戶資訊 | 查詢用戶帳號資料 |
 | `list_custom_fields` | 以關鍵字搜尋自訂欄位（帶 `query` 過濾） | 找 customfield id |
 | `add_comment` | 對 Issue 新增評論 | 回覆或更新進度 |
+| `update_issue_fields` | 修改欄位（白名單）：`labels`／`components` 用 add／remove 增減、不覆蓋既有值；`assignee`（email 或 accountId，空字串＝取消指派）、`duedate`（YYYY-MM-DD）、`summary` 直接設定。回傳修改前後值 | 加／移除標籤、改指派人或到期日 |
+| `list_transitions` | 列出目前狀態與可執行的狀態流轉（唯讀） | 改狀態前查有哪些選項 |
+| `transition_issue` | 執行狀態流轉；須帶 `transition_id` 與確認時的 `expected_status`，狀態已變就拒絕 | 推進單據狀態 |
+| `add_worklog` | 記錄工時（`time_spent` 如 `1h 30m`，可帶 `started`、說明），記在自己的 Jira 帳號下 | 押工時 |
+
+**寫入工具一律先確認**：`add_comment` 以外的三個寫入工具（`update_issue_fields`、`transition_issue`、`add_worklog`），AI 必須先把「單號、要改什麼（目前狀態 → 目標狀態、加／移除哪些標籤、工時多少）」列給你確認，你同意後才會呼叫。改狀態固定兩步：`list_transitions` 查 → 確認 → `transition_issue` 執行。需要填欄位的 transition（如結案要填 Resolution）工具無法代填，請在 Jira 畫面操作。排程用的 skill（`jira-goal-watch`、`sa-review`）不使用這些工具，寫入仍只有留言。
 
 #### 使用範例
 
@@ -394,6 +400,9 @@ claude mcp add EHRMS-jira-mcp py "-m" "jira_mcp" \
 - 「查 EHRMSONE-29158 的評論」
 - 「查詢 assignee 是 your.name@example.com 的未完成 Issue」
 - 「幫我在 EHRMSONE-29158 加一則評論：已完成初步分析」
+- 「EHRMSONE-29158 加上標籤 先給客戶」
+- 「EHRMSONE-29158 移到 CS Testing」（會先列出可用狀態請你確認）
+- 「EHRMSONE-29158 押 1.5 小時工時，說明：查 log 與寫修正 SQL」
 
 ---
 

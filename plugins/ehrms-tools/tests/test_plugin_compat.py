@@ -29,7 +29,8 @@ EXPECTED_TOOLS = {
     "EHRMS-jira-mcp": {
         "get_issue", "get_issue_summary", "search_issues", "get_comments",
         "get_attachment", "get_issue_changelog", "get_user_info",
-        "list_custom_fields", "add_comment",
+        "list_custom_fields", "add_comment", "update_issue_fields",
+        "list_transitions", "transition_issue", "add_worklog",
     },
     "ehrms-database": {
         "echo", "mssql_query", "mssql_test_connection", "search_tables",

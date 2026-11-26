@@ -23,7 +23,7 @@ EHRMS 的測試分兩關：**SA 測試**（工程人員測）→ **CS 測試**�
 
 ## 適用範圍與限制
 
-- **寫入動作僅限 `add_comment`**。Jira MCP 沒有 transition 工具，本 skill 不改單的狀態（測完移到 CS 測試由使用者自己操作）。
+- **寫入動作僅限 `add_comment`**。Jira MCP 雖有改欄位、改狀態（transition）、押工時的工具，但都要求先經使用者確認，本 skill 不使用、不改單的狀態（測完移到 CS 測試由使用者自己操作）。
 - **不修改任何程式碼、不建立分支、不 commit、不 checkout、不 merge、不 push。** 可執行 `git fetch origin`（只更新遠端追蹤，不動工作目錄）。
 - **git 指令一律用 PowerShell 工具執行**（headless 環境下 Bash 工具的 `git` 需要核准會被擋）。
 - **無人值守（排程／headless）時不可詢問使用者**；不確定的地方在留言中明確標示「未確認」，寧可少說不要猜。手動模式下遇到關鍵分歧可以詢問使用者。

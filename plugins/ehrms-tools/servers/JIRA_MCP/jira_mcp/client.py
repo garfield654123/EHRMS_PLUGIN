@@ -2,6 +2,8 @@
 
 import json as _json
 import os
+import re
+from datetime import date, datetime
 from typing import Any, Optional
 import httpx
 from .config import config, JiraCredentials
@@ -65,6 +67,9 @@ class JiraClient:
         elif response.status_code >= 400:
             response.raise_for_status()
 
+        # PUT issue、POST transitions 成功時回 204 無內容
+        if response.status_code == 204 or not response.content:
+            return {}
         return response.json()
 
     async def get(self, endpoint: str, params: Optional[dict] = None) -> dict[str, Any]:
@@ -74,6 +79,10 @@ class JiraClient:
     async def post(self, endpoint: str, json_data: dict) -> dict[str, Any]:
         """執行 POST 請求"""
         return await self._request("POST", endpoint, json_data=json_data)
+
+    async def put(self, endpoint: str, json_data: dict) -> dict[str, Any]:
+        """執行 PUT 請求"""
+        return await self._request("PUT", endpoint, json_data=json_data)
 
     # search_issues detail="full" 抓取的欄位。
     # 不可用 *all：EHRMSONE 掛了數百個共用 customfield（多為流程範本文字），
@@ -520,6 +529,17 @@ class JiraClient:
         """取得所有自訂欄位的定義"""
         return await self.get("field")
 
+    @staticmethod
+    def _text_to_adf(text: str) -> dict[str, Any]:
+        """純文字 → ADF。逐行拆成段落：單一 text node 內的 \\n 不會被 Jira 渲染成換行"""
+        content = []
+        for line in text.split("\n"):
+            para: dict[str, Any] = {"type": "paragraph", "content": []}
+            if line:
+                para["content"] = [{"type": "text", "text": line}]
+            content.append(para)
+        return {"version": 1, "type": "doc", "content": content}
+
     async def add_comment(self, issue_key: str, body: str) -> dict[str, Any]:
         """
         對 Issue 新增評論
@@ -528,15 +548,257 @@ class JiraClient:
             issue_key: Issue 的 Key (例如: PROJ-123)
             body: 評論內容（純文字，將轉為 ADF 格式）
         """
-        # 逐行拆成段落：單一 text node 內的 \n 不會被 Jira 渲染成換行
-        content = []
-        for line in body.split("\n"):
-            para: dict[str, Any] = {"type": "paragraph", "content": []}
-            if line:
-                para["content"] = [{"type": "text", "text": line}]
-            content.append(para)
-        adf_body = {"version": 1, "type": "doc", "content": content}
-        return await self.post(f"issue/{issue_key}/comment", json_data={"body": adf_body})
+        return await self.post(f"issue/{issue_key}/comment",
+                               json_data={"body": self._text_to_adf(body)})
+
+    # ── 寫入：修改欄位（白名單） ─────────────────────────────
+    _ACCOUNT_ID_RE = re.compile(r"^[0-9a-f]{24}$|^\d+:[0-9a-f-]{36}$", re.I)
+    UPDATE_RESULT_FIELDS = ["summary", "status", "assignee", "duedate",
+                            "labels", "components"]
+
+    @staticmethod
+    def _clean_names(values: Optional[list[str]], kind: str) -> list[str]:
+        """去空白、去重；標籤不可含空白（Jira 限制）。"""
+        out: list[str] = []
+        for v in values or []:
+            v = str(v).strip()
+            if not v:
+                continue
+            if kind == "標籤" and re.search(r"\s", v):
+                raise ValueError(f"標籤不可含空白：「{v}」，未做任何修改")
+            if v not in out:
+                out.append(v)
+        return out
+
+    async def _resolve_assignee(self, assignee: str) -> Optional[str]:
+        """email／accountId → accountId；空字串代表取消指派（回 None）。"""
+        assignee = assignee.strip()
+        if not assignee:
+            return None
+        if self._ACCOUNT_ID_RE.match(assignee):
+            return assignee
+        if "@" not in assignee:
+            raise ValueError(
+                f"assignee 請填 email 或 accountId（收到「{assignee}」），未做任何修改；"
+                "可先用 get_user_info 查詢")
+        users = await self.get("user/search",
+                               params={"query": assignee, "maxResults": 10})
+        exact = [u for u in users
+                 if (u.get("emailAddress") or "").lower() == assignee.lower()]
+        candidates = exact or users
+        if len(candidates) == 1:
+            return candidates[0]["accountId"]
+        if not candidates:
+            raise ValueError(f"查無使用者「{assignee}」，未做任何修改")
+        names = [f"{u.get('displayName')}（{u.get('accountId')}）" for u in candidates]
+        raise ValueError(
+            f"「{assignee}」對到多位使用者，未做任何修改，請改填 accountId：{names}")
+
+    async def update_issue_fields(
+        self,
+        issue_key: str,
+        add_labels: Optional[list[str]] = None,
+        remove_labels: Optional[list[str]] = None,
+        add_components: Optional[list[str]] = None,
+        remove_components: Optional[list[str]] = None,
+        assignee: Optional[str] = None,
+        duedate: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        以白名單更新 Issue 欄位（PUT issue/{key}）。
+
+        - labels／components：用 update 語法 add／remove，不覆蓋既有值
+        - assignee：email 或 accountId；空字串＝取消指派
+        - duedate：YYYY-MM-DD；空字串＝清空
+        - summary：整段取代（不可空白）
+        參數為 None 表示不動該欄位。回傳修改前後的欄位值供核對。
+        """
+        add_l = self._clean_names(add_labels, "標籤")
+        rm_l = self._clean_names(remove_labels, "標籤")
+        add_c = self._clean_names(add_components, "元件")
+        rm_c = self._clean_names(remove_components, "元件")
+        for kind, a, r in (("標籤", add_l, rm_l), ("元件", add_c, rm_c)):
+            both = set(a) & set(r)
+            if both:
+                raise ValueError(f"{kind}同時出現在新增與移除：{sorted(both)}，未做任何修改")
+
+        update: dict[str, list] = {}
+        if add_l or rm_l:
+            update["labels"] = ([{"add": x} for x in add_l]
+                                + [{"remove": x} for x in rm_l])
+        if add_c or rm_c:
+            update["components"] = ([{"add": {"name": x}} for x in add_c]
+                                    + [{"remove": {"name": x}} for x in rm_c])
+
+        fields: dict[str, Any] = {}
+        if summary is not None:
+            summary = summary.strip()
+            if not summary:
+                raise ValueError("summary 不可空白，未做任何修改")
+            fields["summary"] = summary
+        if duedate is not None:
+            duedate = duedate.strip()
+            if duedate:
+                try:
+                    date.fromisoformat(duedate)
+                except ValueError:
+                    raise ValueError(
+                        f"duedate 格式須為 YYYY-MM-DD（收到「{duedate}」），未做任何修改")
+            fields["duedate"] = duedate or None
+        if assignee is not None:
+            fields["assignee"] = {"accountId": await self._resolve_assignee(assignee)}
+
+        if not update and not fields:
+            raise ValueError("沒有指定任何要修改的欄位")
+
+        before = await self._update_snapshot(issue_key)
+        body: dict[str, Any] = {}
+        if update:
+            body["update"] = update
+        if fields:
+            body["fields"] = fields
+        await self.put(f"issue/{issue_key}", json_data=body)
+        after = await self._update_snapshot(issue_key)
+        changed = [k for k in after if after[k] != before.get(k)]
+        return {"issue": issue_key, "updated": True, "changed_fields": changed,
+                "before": before, "after": after}
+
+    async def _update_snapshot(self, issue_key: str) -> dict[str, Any]:
+        issue = await self.get_issue(issue_key, fields=self.UPDATE_RESULT_FIELDS,
+                                     plain_text=False)
+        f = issue.get("fields", {})
+        return {
+            "summary": f.get("summary", ""),
+            "status": (f.get("status") or {}).get("name", ""),
+            "assignee": (f.get("assignee") or {}).get("displayName", ""),
+            "duedate": f.get("duedate"),
+            "labels": sorted(f.get("labels") or []),
+            "components": sorted(c.get("name", "") for c in f.get("components") or []),
+        }
+
+    # ── 寫入：狀態流轉（transition） ─────────────────────────
+    async def _current_status(self, issue_key: str) -> dict[str, Any]:
+        issue = await self.get_issue(issue_key, fields=["summary", "status"],
+                                     plain_text=False)
+        f = issue.get("fields", {})
+        return {"key": issue.get("key") or issue_key,
+                "summary": f.get("summary", ""),
+                "status": (f.get("status") or {}).get("name", "")}
+
+    async def _transitions(self, issue_key: str) -> list[dict[str, Any]]:
+        data = await self.get(f"issue/{issue_key}/transitions",
+                              params={"expand": "transitions.fields"})
+        out = []
+        for t in data.get("transitions", []):
+            required = [
+                (meta or {}).get("name") or fid
+                for fid, meta in (t.get("fields") or {}).items()
+                if (meta or {}).get("required")
+            ]
+            item: dict[str, Any] = {"id": str(t.get("id")), "name": t.get("name", ""),
+                                    "to_status": (t.get("to") or {}).get("name", "")}
+            if required:
+                item["required_fields"] = required
+            out.append(item)
+        return out
+
+    async def list_transitions(self, issue_key: str) -> dict[str, Any]:
+        """列出 Issue 目前狀態與可執行的 transition（唯讀）。"""
+        cur = await self._current_status(issue_key)
+        transitions = await self._transitions(issue_key)
+        out: dict[str, Any] = {
+            "issue": cur["key"], "summary": cur["summary"],
+            "current_status": cur["status"], "transitions": transitions,
+            "next_step": ("要執行時，先向使用者確認「單號、目前狀態 → 目標狀態」，"
+                          "取得同意後再呼叫 transition_issue（帶 transition_id 與 "
+                          "expected_status=目前狀態）。"),
+        }
+        if any(t.get("required_fields") for t in transitions):
+            out["note"] = ("有 required_fields 的 transition 需要填欄位，"
+                           "本工具無法代填，執行可能失敗，請改在 Jira 畫面操作")
+        return out
+
+    async def transition_issue(self, issue_key: str, transition_id: str,
+                               expected_status: str) -> dict[str, Any]:
+        """
+        執行 transition。執行前核對目前狀態仍是 expected_status、
+        且 transition_id 仍在可用清單中，任一不符即拒絕、不送出。
+        """
+        transition_id = str(transition_id or "").strip()
+        expected = (expected_status or "").strip()
+        if not transition_id or not expected:
+            raise ValueError("transition_id 與 expected_status 都必填；請先用 list_transitions 查詢")
+
+        cur = await self._current_status(issue_key)
+        if cur["status"].casefold() != expected.casefold():
+            raise ValueError(
+                f"{cur['key']} 目前狀態是「{cur['status']}」，與確認時的「{expected}」不同，"
+                "未執行。請重新 list_transitions 並再次向使用者確認")
+
+        transitions = await self._transitions(issue_key)
+        target = next((t for t in transitions if t["id"] == transition_id), None)
+        if not target:
+            avail = [f"{t['id']}:{t['name']}→{t['to_status']}" for t in transitions]
+            raise ValueError(
+                f"{cur['key']} 目前沒有 id={transition_id} 的 transition，未執行。可用：{avail}")
+
+        await self.post(f"issue/{issue_key}/transitions",
+                        json_data={"transition": {"id": transition_id}})
+        after = await self._current_status(issue_key)
+        return {"issue": cur["key"], "summary": cur["summary"],
+                "transition": target["name"],
+                "from_status": cur["status"], "to_status": after["status"]}
+
+    # ── 寫入：記錄工時（worklog） ────────────────────────────
+    _TIME_SPENT_RE = re.compile(r"^\d+(\.\d+)?[wdhm]( \d+(\.\d+)?[wdhm])*$")
+
+    @staticmethod
+    def _jira_datetime(value: Optional[str]) -> str:
+        """YYYY-MM-DD 或 YYYY-MM-DD HH:MM（本機時區）→ Jira worklog started 格式。
+        不填＝現在；只給日期＝當天 09:00。"""
+        value = (value or "").strip()
+        if not value:
+            dt = datetime.now().astimezone()
+        else:
+            try:
+                dt = datetime.fromisoformat(value.replace("T", " "))
+            except ValueError:
+                raise ValueError(
+                    f"started 格式須為 YYYY-MM-DD 或 YYYY-MM-DD HH:MM（收到「{value}」），未記錄工時")
+            if len(value) == 10:
+                dt = dt.replace(hour=9)
+            if dt.tzinfo is None:
+                dt = dt.astimezone()
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.000%z")
+
+    async def add_worklog(self, issue_key: str, time_spent: str,
+                          started: Optional[str] = None,
+                          comment: Optional[str] = None) -> dict[str, Any]:
+        """
+        對 Issue 記錄工時（POST issue/{key}/worklog）。
+
+        Args:
+            time_spent: Jira 時間格式，例如 "1h 30m"、"2h"、"45m"、"1d"
+            started: 開始時間 YYYY-MM-DD 或 YYYY-MM-DD HH:MM（本機時區），不填＝現在
+            comment: 工時說明（純文字，選填）
+        """
+        time_spent = " ".join((time_spent or "").split())
+        if not self._TIME_SPENT_RE.match(time_spent):
+            raise ValueError(
+                f"time_spent 格式錯誤（收到「{time_spent}」），例：1h 30m、2h、45m、1d；未記錄工時")
+        body: dict[str, Any] = {"timeSpent": time_spent,
+                                "started": self._jira_datetime(started)}
+        if comment and comment.strip():
+            body["comment"] = self._text_to_adf(comment)
+        result = await self.post(f"issue/{issue_key}/worklog", json_data=body)
+        return {
+            "issue": issue_key,
+            "worklog_id": result.get("id"),
+            "time_spent": result.get("timeSpent", time_spent),
+            "started": result.get("started", body["started"]),
+            "author": (result.get("author") or {}).get("displayName", ""),
+        }
 
     async def get_issue_changelog(self, issue_key: str, limit: int = 50,
                                   fields: Optional[list[str]] = None,
